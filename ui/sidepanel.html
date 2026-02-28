@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIDA — AI Dispatcher</title>
+    <link rel="stylesheet" href="components/styles.css">
+</head>
+<body>
+
+<div id="aida-app">
+
+    <!-- ======================================================
+         Sidebar — навигация (50px)
+    ====================================================== -->
+    <nav id="sidebar">
+        <button class="sidebar-icon active" data-section="search" title="Search loads">
+            🔍
+            <span class="tooltip">Search</span>
+        </button>
+        <button class="sidebar-icon" data-section="bookmarks" title="Bookmarks">
+            🔖
+            <span class="tooltip">Bookmarks</span>
+        </button>
+        <button class="sidebar-icon" data-section="history" title="Call history">
+            📞
+            <span class="tooltip">History</span>
+        </button>
+        <button class="sidebar-icon" data-section="agent" title="OpenClaw Agent">
+            🤖
+            <span class="tooltip">Agent</span>
+        </button>
+        <button class="sidebar-icon" data-section="settings" title="Settings">
+            ⚙️
+            <span class="tooltip">Settings</span>
+        </button>
+
+        <div class="sidebar-spacer"></div>
+
+        <button class="sidebar-icon" id="btn-theme" title="Theme">
+            🎨
+            <span class="tooltip">Theme</span>
+        </button>
+    </nav>
+
+    <!-- ======================================================
+         Main content
+    ====================================================== -->
+    <main id="content">
+
+        <!-- Section: Поиск грузов -->
+        <div id="section-search" class="section-content">
+
+            <!-- Search Panel -->
+            <div id="search-panel">
+                <div class="search-field field-origin">
+                    <label>Origin</label>
+                    <input type="text" id="origin-city" placeholder="Chicago" autocomplete="off">
+                </div>
+                <div class="search-field field-state">
+                    <label>State</label>
+                    <input type="text" id="origin-state" placeholder="IL" maxlength="2" style="text-transform:uppercase">
+                </div>
+                <div class="search-field field-radius">
+                    <label>Radius</label>
+                    <input type="number" id="search-radius" placeholder="50" min="0" max="500" value="50">
+                </div>
+
+                <div class="search-divider"></div>
+
+                <div class="search-field field-dest">
+                    <label>Destination</label>
+                    <input type="text" id="dest-city" placeholder="Dallas" autocomplete="off">
+                </div>
+                <div class="search-field field-dest-st">
+                    <label>State</label>
+                    <input type="text" id="dest-state" placeholder="TX" maxlength="2" style="text-transform:uppercase">
+                </div>
+
+                <div class="search-divider"></div>
+
+                <div class="search-field field-equip">
+                    <label>Type</label>
+                    <select id="equipment">
+                        <option value="VAN">Van</option>
+                        <option value="REEFER">Reefer</option>
+                        <option value="FLATBED">Flatbed</option>
+                    </select>
+                </div>
+
+                <div class="search-field field-date">
+                    <label>From date</label>
+                    <input type="date" id="date-from">
+                </div>
+                <div class="search-field field-date">
+                    <label>To date</label>
+                    <input type="date" id="date-to">
+                </div>
+
+                <button class="btn-search" id="btn-search">Search</button>
+            </div>
+
+            <!-- Table area -->
+            <div id="table-area">
+                <div id="load-table-wrap">
+                    <table id="load-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="rate">Rate $</th>
+                                <th data-sort="rpm">$/mi</th>
+                                <th data-sort="equipment">Type</th>
+                                <th data-sort="origin">Origin</th>
+                                <th>→</th>
+                                <th data-sort="destination">Destination</th>
+                                <th data-sort="miles">Miles</th>
+                                <th data-sort="weight">Weight</th>
+                                <th data-sort="broker">Broker</th>
+                                <th data-sort="board">Board</th>
+                                <th data-sort="pickupDate">Date</th>
+                                <th data-sort="status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="loads-tbody">
+                            <!-- Заполняется из JS -->
+                        </tbody>
+                    </table>
+                    <div class="table-empty" id="table-empty" style="display:none">
+                        <div class="icon">📦</div>
+                        <div class="msg">No loads. Enter params and click Search.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section: Закладки -->
+        <div id="section-bookmarks" class="section-content" style="display:none">
+            <div class="section-title">🔖 Bookmarks</div>
+            <div class="section-body" id="bookmarks-body">
+                <!-- Заполняется из JS -->
+            </div>
+        </div>
+
+        <!-- Section: История -->
+        <div id="section-history" class="section-content" style="display:none">
+            <div class="section-title">📞 Call history</div>
+            <div class="section-body" id="history-body">
+                <!-- Заполняется из JS -->
+            </div>
+        </div>
+
+        <!-- Section: Агент -->
+        <div id="section-agent" class="section-content" style="display:none">
+            <div class="section-title">🤖 OpenClaw Agent</div>
+            <div class="section-body">
+                <div class="agent-toggle">
+                    <span class="agent-toggle-label">Agent active</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="agent-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="settings-group">
+                    <h3>Connection</h3>
+                    <div class="settings-row">
+                        <label>Server URL</label>
+                        <input type="text" id="openclaw-url" placeholder="http://localhost:3000">
+                    </div>
+                    <div class="settings-row">
+                        <label>API Key (optional)</label>
+                        <input type="text" id="openclaw-key" placeholder="Empty = no auth">
+                    </div>
+                    <div class="settings-row">
+                        <label>Polling interval (ms)</label>
+                        <input type="number" id="openclaw-interval" value="5000" min="1000" max="60000">
+                    </div>
+                    <button class="btn-save-settings" id="btn-save-openclaw">Save</button>
+                </div>
+                <div id="agent-status-block" style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+                    Status: <span id="agent-status-text">Off</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section: Настройки -->
+        <div id="section-settings" class="section-content" style="display:none">
+            <div class="section-title">⚙️ Settings</div>
+            <div class="section-body">
+                <div class="settings-group">
+                    <h3>Company / Dispatcher</h3>
+                    <div class="settings-row">
+                        <label>Dispatcher name</label>
+                        <input type="text" id="set-name" placeholder="John Smith">
+                    </div>
+                    <div class="settings-row">
+                        <label>Company</label>
+                        <input type="text" id="set-company" placeholder="Smith Trucking LLC">
+                    </div>
+                    <div class="settings-row">
+                        <label>Phone</label>
+                        <input type="text" id="set-phone" placeholder="+1 (630) 555-0100">
+                    </div>
+                    <div class="settings-row">
+                        <label>Email</label>
+                        <input type="email" id="set-email" placeholder="dispatch@company.com">
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <h3>Retell AI</h3>
+                    <div class="settings-row">
+                        <label>Retell API Key</label>
+                        <input type="text" id="set-retell-key" placeholder="key_...">
+                    </div>
+                    <div class="settings-row">
+                        <label>From Number</label>
+                        <input type="text" id="set-retell-from" placeholder="+16305550100">
+                    </div>
+                    <div class="settings-row">
+                        <label>Agent ID (optional)</label>
+                        <input type="text" id="set-retell-agent" placeholder="agent_...">
+                    </div>
+                </div>
+                <button class="btn-save-settings" id="btn-save-settings">Save settings</button>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <footer id="status-bar">
+            <div class="status-item">
+                <div class="status-dot" id="dot-dat"></div>
+                <span>DAT</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot" id="dot-ts"></div>
+                <span>Truckstop</span>
+            </div>
+            <div class="status-item" id="status-count">
+                <span>—</span>
+            </div>
+            <div class="status-item" id="status-updated" style="margin-left:auto">
+                <span></span>
+            </div>
+            <div class="status-item" id="status-agent">
+                <span>Agent: off</span>
+            </div>
+        </footer>
+
+    </main>
+
+    <!-- ======================================================
+         Detail Panel (выезжает справа)
+    ====================================================== -->
+    <aside id="detail-panel">
+        <div class="detail-header">
+            <h2 id="detail-title">Load details</h2>
+            <button class="detail-close" id="btn-detail-close">✕</button>
+        </div>
+        <div class="detail-body" id="detail-body">
+            <!-- Заполняется из JS -->
+        </div>
+        <div class="detail-actions">
+            <button class="btn btn-call" id="detail-btn-call">📞 Call</button>
+            <button class="btn btn-email" id="detail-btn-email">✉️ Email</button>
+            <button class="btn btn-save" id="detail-btn-save">🔖 Save</button>
+        </div>
+    </aside>
+
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="sidepanel.js" type="module"></script>
+
+</body>
+</html>

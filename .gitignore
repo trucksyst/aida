@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Dependencies (if added later)
+node_modules/
+
+# Build / dist (if added later)
+dist/
+*.crx
+*.pem
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets (do not commit)
+.env
+.env.local
+*.key

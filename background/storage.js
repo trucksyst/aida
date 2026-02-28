@@ -1,0 +1,194 @@
+/**
+ * AIDA v0.1 — Storage
+ * Единое хранилище через chrome.storage.local с namespace-префиксами.
+ *
+ * Namespaces:
+ *   token:dat          Bearer токен DAT
+ *   token:truckstop    Bearer токен Truckstop
+ *   work:loads         Массив активных карточек грузов
+ *   settings:user      Настройки диспетчера
+ *   settings:openclaw  Настройки OpenClaw агента
+ *   saved:bookmarks    Закладки (status=saved)
+ *   history:calls      История звонков
+ */
+
+const Storage = {
+
+  // ============================================================
+  // Tokens
+  // ============================================================
+
+  async getToken(board) {
+    const key = `token:${board}`;
+    const data = await chrome.storage.local.get(key);
+    return data[key] || null;
+  },
+
+  async setToken(board, token) {
+    await chrome.storage.local.set({ [`token:${board}`]: token });
+  },
+
+  // ============================================================
+  // Loads (work namespace)
+  // ============================================================
+
+  async getLoads() {
+    const data = await chrome.storage.local.get('work:loads');
+    return data['work:loads'] || [];
+  },
+
+  async setLoads(loads) {
+    await chrome.storage.local.set({ 'work:loads': loads });
+  },
+
+  async updateLoadStatus(loadId, status) {
+    const loads = await this.getLoads();
+    const updated = loads.map(l => l.id === loadId ? { ...l, status } : l);
+    await this.setLoads(updated);
+
+    // Если статус saved — дублируем в закладки
+    if (status === 'saved') {
+      const load = loads.find(l => l.id === loadId);
+      if (load) await this.addBookmark({ ...load, status: 'saved' });
+    }
+  },
+
+  async clearActive() {
+    const loads = await this.getLoads();
+    const filtered = loads.filter(l => l.status !== 'active');
+    await this.setLoads(filtered);
+  },
+
+  // ============================================================
+  // Settings
+  // ============================================================
+
+  async getSettings() {
+    const data = await chrome.storage.local.get(['settings:user', 'settings:openclaw', 'settings:lastSearch']);
+    return {
+      user: data['settings:user'] || {},
+      openclaw: data['settings:openclaw'] || {
+        url: 'http://localhost:3000',
+        api_key: '',
+        interval: 5000,
+        enabled: false
+      },
+      lastSearch: data['settings:lastSearch'] || null
+    };
+  },
+
+  async saveSettings(data) {
+    const updates = {};
+    if (data.user !== undefined) updates['settings:user'] = data.user;
+    if (data.openclaw !== undefined) updates['settings:openclaw'] = data.openclaw;
+    if (data.lastSearch !== undefined) updates['settings:lastSearch'] = data.lastSearch;
+    await chrome.storage.local.set(updates);
+  },
+
+  // ============================================================
+  // Bookmarks (saved namespace)
+  // ============================================================
+
+  async getBookmarks() {
+    const data = await chrome.storage.local.get('saved:bookmarks');
+    return data['saved:bookmarks'] || [];
+  },
+
+  async addBookmark(load) {
+    const bookmarks = await this.getBookmarks();
+    const exists = bookmarks.some(b => b.id === load.id);
+    if (!exists) {
+      bookmarks.push({ ...load, savedAt: new Date().toISOString() });
+      await chrome.storage.local.set({ 'saved:bookmarks': bookmarks });
+    }
+  },
+
+  async removeBookmark(loadId) {
+    const bookmarks = await this.getBookmarks();
+    await chrome.storage.local.set({
+      'saved:bookmarks': bookmarks.filter(b => b.id !== loadId)
+    });
+  },
+
+  // ============================================================
+  // History (history namespace)
+  // ============================================================
+
+  async getHistory(filters = {}) {
+    const data = await chrome.storage.local.get('history:calls');
+    let history = data['history:calls'] || [];
+
+    if (filters.dateFrom) {
+      history = history.filter(h => h.callTime >= filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      history = history.filter(h => h.callTime <= filters.dateTo);
+    }
+    if (filters.board) {
+      history = history.filter(h => h.board === filters.board);
+    }
+
+    return history;
+  },
+
+  async addHistoryEntry(entry) {
+    const data = await chrome.storage.local.get('history:calls');
+    const history = data['history:calls'] || [];
+    history.unshift({ ...entry, id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
+    await chrome.storage.local.set({ 'history:calls': history });
+  },
+
+  async updateHistoryEntry(entryId, updates) {
+    const data = await chrome.storage.local.get('history:calls');
+    const history = (data['history:calls'] || []).map(h =>
+      h.id === entryId ? { ...h, ...updates } : h
+    );
+    await chrome.storage.local.set({ 'history:calls': history });
+  },
+
+  // ============================================================
+  // Cleanup — удаление устаревших записей
+  // ============================================================
+
+  async pruneHistory() {
+    const now = Date.now();
+    const MS_60_DAYS = 60 * 24 * 60 * 60 * 1000;
+
+    // Очищаем loads: no_response удаляем, booked > 60 дней удаляем
+    const loads = await this.getLoads();
+    const cleanLoads = loads.filter(l => {
+      if (l.status === 'no_response') return false;
+      if (l.status === 'booked' && l.bookedAt) {
+        return (now - new Date(l.bookedAt).getTime()) < MS_60_DAYS;
+      }
+      return true;
+    });
+    await this.setLoads(cleanLoads);
+
+    // Очищаем закладки: no_response удаляем
+    const bookmarks = await this.getBookmarks();
+    const cleanBookmarks = bookmarks.filter(b => b.status !== 'no_response');
+    await chrome.storage.local.set({ 'saved:bookmarks': cleanBookmarks });
+
+    // История звонков: booked > 60 дней удаляем
+    const data = await chrome.storage.local.get('history:calls');
+    const history = (data['history:calls'] || []).filter(h => {
+      if (!h.callTime) return false;
+      return (now - new Date(h.callTime).getTime()) < MS_60_DAYS;
+    });
+    await chrome.storage.local.set({ 'history:calls': history });
+
+    // emailed / called_pending → no_response если прошло 24 часа
+    const MS_24H = 24 * 60 * 60 * 1000;
+    const allLoads = await this.getLoads();
+    const updatedLoads = allLoads.map(l => {
+      if (!['emailed', 'called_pending'].includes(l.status)) return l;
+      const age = now - new Date(l.statusUpdatedAt || l.postedAt).getTime();
+      if (age > MS_24H) return { ...l, status: 'no_response' };
+      return l;
+    });
+    await this.setLoads(updatedLoads);
+  }
+};
+
+export default Storage;

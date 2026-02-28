@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "114",
+  "name": "AIDA — AI Dispatcher",
+  "short_name": "AIDA",
+  "version": "0.1.0",
+  "description": "Персональный инструмент диспетчера. Агрегирует грузы со всех лоадбордов в одном окне.",
+
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+
+  "side_panel": {
+    "default_path": "ui/sidepanel.html",
+    "openPanelOnActionClick": true
+  },
+
+  "action": {
+    "default_title": "AIDA Dispatcher"
+  },
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "scripting",
+    "alarms"
+  ],
+
+  "host_permissions": [
+    "https://one.dat.com/*",
+    "https://freight.api.dat.com/*",
+    "https://identity.api.dat.com/*",
+    "https://www.truckstop.com/*",
+    "https://api.truckstop.com/*",
+    "https://truckstop.com/*",
+    "https://api.retellai.com/*"
+  ],
+
+  "content_scripts": [
+    {
+      "js": ["harvesters/harvester-dat.js"],
+      "matches": ["https://one.dat.com/*"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "js": ["harvesters/harvester-truckstop.js"],
+      "matches": [
+        "https://www.truckstop.com/*",
+        "https://truckstop.com/*"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
