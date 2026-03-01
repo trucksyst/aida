@@ -17,6 +17,10 @@ dist/
 *.crx
 *.pem
 
+# Playwright (скрипт open-dat)
+.playwright-user-data/
+aida-last-screenshot.png
+
 # Logs
 *.log
 npm-debug.log*

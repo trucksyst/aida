@@ -2,7 +2,7 @@
  * AIDA v0.1 — Harvester Truckstop
  * Content script (MAIN world) на truckstop.com.
  * Единственная задача: перехватить Bearer токен из исходящих запросов
- * и передать в background через chrome.runtime.sendMessage.
+ * и передать в background через postMessage → bridge (в MAIN мире нет chrome.runtime).
  *
  * Не трогает DOM. Не нажимает кнопки. Только слушает сеть.
  */
@@ -15,18 +15,16 @@
 
     let _lastToken = null;
 
+    function sendToBridge(payload) {
+        try {
+            window.postMessage({ source: 'aida-harvester', payload: payload }, '*');
+        } catch (e) {}
+    }
+
     function sendToken(token) {
         if (!token || token === _lastToken) return;
         _lastToken = token;
-        try {
-            chrome.runtime.sendMessage({
-                type: 'TOKEN_HARVESTED',
-                board: 'truckstop',
-                token
-            });
-        } catch (e) {
-            // Extension context may be invalidated on reload
-        }
+        sendToBridge({ type: 'TOKEN_HARVESTED', board: 'truckstop', token: token });
     }
 
     // ============================================================

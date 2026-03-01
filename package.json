@@ -1,0 +1,13 @@
+{
+  "name": "aida-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIDA — AI Dispatcher Chrome Extension",
+  "scripts": {
+    "open-dat": "node scripts/open-dat.js",
+    "playwright:install": "npx playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

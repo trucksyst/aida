@@ -1,5 +1,6 @@
 /* ============================================================
-   AIDA v0.1 — SidePanel Styles
+   AIDA v0.1 — Full-window Load Board UI
+   Открывается в отдельной вкладке (полноэкранный режим).
    Тема: тёмная по умолчанию, светлая через [data-theme="light"]
    ============================================================ */
 
@@ -90,7 +91,10 @@ html, body {
 
 #aida-app {
     display: flex;
+    width: 100%;
+    min-width: 100%;
     height: 100vh;
+    min-height: 100vh;
     overflow: hidden;
 }
 
@@ -213,13 +217,50 @@ html, body {
     border-color: var(--accent);
 }
 
-.search-field.field-origin input { width: 130px; }
+.search-field.field-origin input { width: 160px; }
 .search-field.field-state input  { width: 50px; }
 .search-field.field-radius input { width: 55px; }
-.search-field.field-dest input   { width: 110px; }
+.search-field.field-dest input   { width: 140px; }
 .search-field.field-dest-st input{ width: 50px; }
+
+/* Origin/Destination autocomplete (City, ST and zones) */
+.wrap-autocomplete { position: relative; }
+.location-autocomplete {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 100;
+}
+.location-autocomplete.open { display: block; }
+.location-autocomplete-item {
+    padding: 6px 10px;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+}
+.location-autocomplete-item:last-child { border-bottom: none; }
+.location-autocomplete-item:hover {
+    background: var(--bg-hover);
+}
+.location-autocomplete-loading {
+    color: var(--text-muted);
+    cursor: default;
+}
+.location-autocomplete-loading:hover {
+    background: transparent;
+}
 .search-field.field-equip select { width: 90px; }
-.search-field.field-date input   { width: 100px; }
+.search-field.field-date input   { width: 150px; min-width: 150px; }
 
 .search-divider {
     width: 1px;
@@ -356,6 +397,19 @@ html, body {
 .status-badge.called_pending{ background: #2c2c1a; color: var(--warning); }
 .status-badge.booked        { background: #1a3c1a; color: var(--success); }
 .status-badge.no_response   { background: #3c1a1a; color: var(--danger); }
+
+/* Светлая тема: реверс — буквы синие/цветные, плоскость белая */
+[data-theme="light"] .board-badge.dat  { background: #fff; color: #0969da; border: 1px solid #0969da; }
+[data-theme="light"] .board-badge.ts   { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
+[data-theme="light"] .board-badge.tp   { background: #fff; color: #cf222e; border: 1px solid #cf222e; }
+[data-theme="light"] .status-badge.active        { background: #fff; color: #0969da; border: 1px solid #0969da; }
+[data-theme="light"] .status-badge.saved         { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
+[data-theme="light"] .status-badge.calling       { background: #fff; color: #9a6700; border: 1px solid #9a6700; }
+[data-theme="light"] .status-badge.called_pending { background: #fff; color: #9a6700; border: 1px solid #9a6700; }
+[data-theme="light"] .status-badge.booked        { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
+[data-theme="light"] .status-badge.no_response   { background: #fff; color: #cf222e; border: 1px solid #cf222e; }
+[data-theme="light"] .status-badge.emailed       { background: #fff; color: #656d76; border: 1px solid #656d76; }
+[data-theme="light"] .status-badge.replied       { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
 
 /* Empty state */
 .table-empty {

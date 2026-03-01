@@ -2,9 +2,8 @@
  * AIDA v0.1 — SidePanel UI
  * Главный контроллер интерфейса диспетчера.
  *
- * UI никогда не читает из chrome.storage напрямую.
- * Все запросы данных — через chrome.runtime.sendMessage к Core.
- * Обновления в реальном времени — через chrome.storage.onChanged.
+ * UI не использует chrome.storage. Все данные — только через Core API (sendMessage).
+ * Обновления в реальном времени — push от Core (onMessage, type DATA_UPDATED).
  */
 
 // ============================================================
@@ -21,7 +20,8 @@ const state = {
     sortColumn: 'rate',
     sortAsc: false,
     agentEnabled: false,
-    boardStatus: { dat: false, truckstop: false }
+    boardStatus: { dat: false, truckstop: false },
+    lastRefreshTime: null
 };
 
 // ============================================================
@@ -46,36 +46,40 @@ function sendToCore(type, payload = {}) {
 // ============================================================
 
 async function init() {
-    // Загружаем настройки
+    console.log('[AIDA/UI] Step: init start');
     const resp = await sendToCore('GET_SETTINGS');
+    console.log('[AIDA/UI] Step: GET_SETTINGS', resp?.settings ? 'ok' : 'empty');
     if (resp?.settings) {
         state.settings = resp.settings;
         applySettings(resp.settings);
     }
 
-    // Загружаем сохранённые грузы
     const loadsResp = await sendToCore('GET_LOADS');
-    if (loadsResp?.loads) {
-        state.loads = loadsResp.loads;
-        renderTable();
-    }
+    const loadCount = Array.isArray(loadsResp?.loads) ? loadsResp.loads.length : 0;
+    console.log('[AIDA/UI] Step: GET_LOADS →', loadCount, 'loads');
+    state.loads = Array.isArray(loadsResp?.loads) ? loadsResp.loads : [];
 
-    // Устанавливаем дату по умолчанию
+    // Даты по умолчанию, если нет сохранённого поиска
     const today = new Date().toISOString().split('T')[0];
     const in3days = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
     document.getElementById('date-from').value = today;
     document.getElementById('date-to').value = in3days;
 
-    // Проверяем статус токенов
-    updateBoardStatus();
+    // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
+    if (resp?.settings?.lastSearch) {
+        applyLastSearch(resp.settings.lastSearch);
+        console.log('[AIDA/UI] Step: applied last search (origin, destination, dates, etc.)');
+    }
 
-    // Bind events
+    // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
+    renderTable();
+    updateStatusBar();
+
     bindEvents();
 
-    // Real-time updates через storage
-    chrome.storage.onChanged.addListener(onStorageChanged);
-
-    console.log('[AIDA/UI] Ready');
+    // Единственная подписка на обновления — push от Core (контракт API)
+    chrome.runtime.onMessage.addListener(onDataUpdated);
+    console.log('[AIDA/UI] Step: init done. Listening for DATA_UPDATED from Core.');
 }
 
 function applySettings(settings) {
@@ -97,6 +101,11 @@ function applySettings(settings) {
     state.agentEnabled = oc.enabled || false;
     document.getElementById('agent-toggle').checked = state.agentEnabled;
     updateAgentStatus();
+
+    // Статус бордов и тема приходят из Core (GET_SETTINGS), не из Storage
+    state.boardStatus = settings.boardStatus || { dat: false, truckstop: false };
+    if (settings.theme) document.documentElement.dataset.theme = settings.theme;
+    updateBoardDots();
 }
 
 function setVal(id, val) {
@@ -104,34 +113,171 @@ function setVal(id, val) {
     if (el) el.value = val;
 }
 
+/** Заполнить форму поиска из сохранённого lastSearch (память по умолчанию). */
+function applyLastSearch(lastSearch) {
+    if (!lastSearch || typeof lastSearch !== 'object') return;
+    var o = lastSearch.origin || {};
+    var d = lastSearch.destination || {};
+    setVal('origin-city', o.city || '');
+    setVal('origin-state', (o.state || '').toUpperCase().slice(0, 2));
+    setVal('dest-city', d.city || '');
+    setVal('dest-state', (d.state || '').toUpperCase().slice(0, 2));
+    setVal('search-radius', lastSearch.radius != null ? lastSearch.radius : 50);
+    if (lastSearch.equipment) {
+        var eqEl = document.getElementById('equipment');
+        if (eqEl && ['VAN', 'REEFER', 'FLATBED'].indexOf(lastSearch.equipment) !== -1) eqEl.value = lastSearch.equipment;
+    }
+    if (lastSearch.dateFrom) setVal('date-from', lastSearch.dateFrom);
+    if (lastSearch.dateTo) setVal('date-to', lastSearch.dateTo);
+}
+
 // ============================================================
-// Storage Changes (real-time updates)
+// Push от Core (DATA_UPDATED) — единственный канал обновлений
 // ============================================================
 
-function onStorageChanged(changes, area) {
-    if (area !== 'local') return;
-
-    if (changes['work:loads']) {
-        state.loads = changes['work:loads'].newValue || [];
+function onDataUpdated(message) {
+    console.log('[AIDA/UI] onMessage received:', message?.type, message?.payload ? Object.keys(message.payload).join(',') : 'no payload');
+    if (message.type !== 'DATA_UPDATED' || !message.payload) return;
+    const p = message.payload;
+    let updated = [];
+    if (p.loads !== undefined) {
+        state.loads = p.loads;
+        updated.push('loads');
         renderTable();
         updateStatusBar();
     }
-    if (changes['saved:bookmarks']) {
-        state.bookmarks = changes['saved:bookmarks'].newValue || [];
+    if (p.bookmarks !== undefined) {
+        state.bookmarks = p.bookmarks;
+        updated.push('bookmarks');
         if (state.currentSection === 'bookmarks') renderBookmarks();
     }
-    if (changes['history:calls']) {
-        state.history = changes['history:calls'].newValue || [];
+    if (p.history !== undefined) {
+        state.history = p.history;
+        updated.push('history');
         if (state.currentSection === 'history') renderHistory();
     }
-    if (changes['token:dat']) {
-        state.boardStatus.dat = !!changes['token:dat'].newValue;
-        updateBoardDots();
+    if (p.settings !== undefined) {
+        state.settings = p.settings;
+        applySettings(p.settings);
+        updated.push('settings');
     }
-    if (changes['token:truckstop']) {
-        state.boardStatus.truckstop = !!changes['token:truckstop'].newValue;
-        updateBoardDots();
+    if (p.newLoadsCount !== undefined) {
+        updateNewLoadsIndicator(p.newLoadsCount);
+        updated.push('newLoadsCount=' + p.newLoadsCount);
     }
+    if (p.lastRefreshTime !== undefined) {
+        state.lastRefreshTime = p.lastRefreshTime;
+        updateRefreshTimer();
+    }
+    if (updated.length) console.log('[AIDA/UI] Step: DATA_UPDATED →', updated.join(', '));
+}
+
+// ============================================================
+// Location autocomplete (City, ST and zones Z0–Z9)
+// ============================================================
+
+function attachLocationAutocomplete(cityId, stateId, dropdownId) {
+    var cityEl = document.getElementById(cityId);
+    var stateEl = document.getElementById(stateId);
+    var listEl = document.getElementById(dropdownId);
+    if (!cityEl || !stateEl || !listEl || typeof window.AIDALocations === 'undefined') return;
+
+    var debounceTimer = null;
+    var DEBOUNCE_MS = 150;
+
+    function hide() {
+        listEl.innerHTML = '';
+        listEl.classList.remove('open');
+        listEl.setAttribute('aria-hidden', 'true');
+    }
+
+    function show(items, isLoading) {
+        function escapeAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        if (isLoading) {
+            listEl.innerHTML = '<div class="location-autocomplete-item location-autocomplete-loading">Searching online…</div>';
+            listEl.classList.add('open');
+            listEl.setAttribute('aria-hidden', 'false');
+            return;
+        }
+        if (!items.length) { hide(); return; }
+        listEl.innerHTML = items.map(function (item) {
+            var label = item.label || (item.type === 'zone' ? item.value + ' (zone)' : item.value);
+            return '<div class="location-autocomplete-item" data-value="' + escapeAttr(item.value) + '" data-type="' + item.type + '" role="option">' + escapeHtml(label) + '</div>';
+        }).join('');
+        listEl.classList.add('open');
+        listEl.setAttribute('aria-hidden', 'false');
+        listEl.querySelectorAll('.location-autocomplete-item').forEach(function (node) {
+            node.addEventListener('click', function () {
+                var val = node.getAttribute('data-value');
+                var typ = node.getAttribute('data-type');
+                if (typ === 'zone') {
+                    cityEl.value = val;
+                    stateEl.value = '';
+                } else {
+                    var parts = val.split(/\s*,\s*/);
+                    cityEl.value = (parts[0] || '').trim();
+                    stateEl.value = (parts[1] || '').trim().toUpperCase().slice(0, 2);
+                }
+                hide();
+                cityEl.focus();
+            });
+        });
+    }
+
+    function escapeHtml(s) {
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+
+    cityEl.addEventListener('input', function () {
+        window.clearTimeout(debounceTimer);
+        var q = cityEl.value.trim();
+        debounceTimer = window.setTimeout(function () {
+            if (!q) { hide(); return; }
+            var items = window.AIDALocations.getSuggestions(q, 18);
+            if (items.length > 0) {
+                show(items, false);
+            } else if (q.length >= 2) {
+                show([], true);
+                window.AIDALocations.fetchOnlineSuggestions(q, 10, function (online) {
+                    if (listEl.classList.contains('open') && listEl.querySelector('.location-autocomplete-loading')) {
+                        show(online, false);
+                    }
+                });
+            } else {
+                hide();
+            }
+        }, DEBOUNCE_MS);
+    });
+
+    cityEl.addEventListener('focus', function () {
+        var q = cityEl.value.trim();
+        if (q) {
+            var items = window.AIDALocations.getSuggestions(q, 18);
+            if (items.length > 0) {
+                show(items, false);
+            } else if (q.length >= 2) {
+                show([], true);
+                window.AIDALocations.fetchOnlineSuggestions(q, 10, function (online) {
+                    if (listEl.classList.contains('open') && listEl.querySelector('.location-autocomplete-loading')) {
+                        show(online, false);
+                    }
+                });
+            }
+        }
+    });
+
+    cityEl.addEventListener('blur', function () {
+        window.setTimeout(hide, 200);
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.target !== cityEl) return;
+        if (e.key === 'Escape') hide();
+    });
 }
 
 // ============================================================
@@ -139,6 +285,9 @@ function onStorageChanged(changes, area) {
 // ============================================================
 
 function bindEvents() {
+    attachLocationAutocomplete('origin-city', 'origin-state', 'origin-autocomplete');
+    attachLocationAutocomplete('dest-city', 'dest-state', 'dest-autocomplete');
+
     // Sidebar navigation
     document.querySelectorAll('.sidebar-icon[data-section]').forEach(btn => {
         btn.addEventListener('click', () => switchSection(btn.dataset.section));
@@ -232,6 +381,7 @@ function switchSection(section) {
 
 async function doSearch() {
     const params = getSearchParams();
+    console.log('[AIDA/UI] Step: doSearch params', JSON.stringify(params));
     if (!params.origin.city && !params.origin.state) {
         showToast('Enter origin city or state', 'error');
         return;
@@ -245,7 +395,9 @@ async function doSearch() {
     showTableLoading(true);
 
     try {
+        console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
         const resp = await sendToCore('SEARCH_LOADS', { params });
+        console.log('[AIDA/UI] Step: SEARCH_LOADS response', resp?.error ? 'error: ' + resp.error : 'loads: ' + (Array.isArray(resp) ? resp.length : (resp?.loads?.length ?? 0)));
         if (resp?.error) {
             showToast('Search error: ' + resp.error, 'error');
         } else {
@@ -256,10 +408,13 @@ async function doSearch() {
             if (loads.length > 0) {
                 showToast(`Found ${loads.length} loads`);
             } else {
-                showToast('No loads found. Open one.dat.com and run a search there first, then try again.', 'error');
+                if (!state.boardStatus.dat && !state.boardStatus.truckstop) {
+                    showToast('No board connected. Open one.dat.com in another tab, sign in and search there, then try here again.', 'error');
+                } else {
+                    showToast('No loads found for this search.', 'error');
+                }
             }
         }
-        // Подтягиваем из storage на случай ответа из другого контекста
         const fresh = await sendToCore('GET_LOADS');
         if (fresh?.loads?.length > 0 && state.loads.length === 0) {
             state.loads = fresh.loads;
@@ -296,6 +451,15 @@ function getSearchParams() {
 // Table Rendering
 // ============================================================
 
+function getEmptyMessage() {
+    const hasDat = state.boardStatus.dat;
+    const hasTs = state.boardStatus.truckstop;
+    if (!hasDat && !hasTs) {
+        return 'Connect a board first: Open one.dat.com in another tab, sign in, and run a search there. AIDA will capture the connection. Then return here and click Search.';
+    }
+    return 'No loads found. Enter search params and click Search, or try different filters.';
+}
+
 function renderTable() {
     const tbody = document.getElementById('loads-tbody');
     const empty = document.getElementById('table-empty');
@@ -305,6 +469,8 @@ function renderTable() {
     if (loads.length === 0) {
         tbody.innerHTML = '';
         empty.style.display = 'flex';
+        const msgEl = empty.querySelector('.msg');
+        if (msgEl) msgEl.textContent = getEmptyMessage();
         return;
     }
 
@@ -547,7 +713,7 @@ async function doSave(loadId) {
 
 async function loadAndRenderBookmarks() {
     const resp = await sendToCore('GET_BOOKMARKS');
-    state.bookmarks = resp?.bookmarks || [];
+    state.bookmarks = Array.isArray(resp?.bookmarks) ? resp.bookmarks : [];
     renderBookmarks();
 }
 
@@ -708,17 +874,7 @@ function updateAgentStatus() {
 // Status Bar
 // ============================================================
 
-async function updateBoardStatus() {
-    // Проверяем наличие токенов
-    const data = await new Promise(resolve => {
-        chrome.storage.local.get(['token:dat', 'token:truckstop'], resolve);
-    });
-
-    state.boardStatus.dat = !!data['token:dat'];
-    state.boardStatus.truckstop = !!data['token:truckstop'];
-    updateBoardDots();
-}
-
+/** Обновить индикаторы бордов (точки) по state.boardStatus. Данные приходят из Core (GET_SETTINGS / DATA_UPDATED). */
 function updateBoardDots() {
     const dotDat = document.getElementById('dot-dat');
     const dotTs = document.getElementById('dot-ts');
@@ -727,16 +883,56 @@ function updateBoardDots() {
     if (dotTs) dotTs.classList.toggle('online', state.boardStatus.truckstop);
 }
 
+// ============================================================
+// New Loads Bar — SSE уведомление о новых грузах
+// ============================================================
+
+function updateNewLoadsIndicator(count) {
+    const el = document.getElementById('status-new');
+    if (!el) return;
+    if (count <= 0) {
+        el.style.display = 'none';
+        return;
+    }
+    el.querySelector('span').textContent = `+${count} new`;
+    el.style.display = '';
+    el.onclick = refreshLoads;
+}
+
+async function refreshLoads() {
+    const el = document.getElementById('status-new');
+    if (el) { el.querySelector('span').textContent = '...'; el.style.pointerEvents = 'none'; }
+    const resp = await sendToCore('REFRESH_LOADS');
+    if (el) { el.style.display = 'none'; el.style.pointerEvents = ''; }
+    if (resp?.error) {
+        showToast(resp.error, 'error');
+    }
+}
+
 function updateStatusBar() {
     const countEl = document.getElementById('status-count');
-    const updEl = document.getElementById('status-updated');
-
     const active = state.loads.filter(l => l.status === 'active').length;
     const total = state.loads.length;
 
     if (countEl) countEl.querySelector('span').textContent = `${active} loads${total !== active ? ` (${total} total)` : ''}`;
-    if (updEl) updEl.querySelector('span').textContent = `Updated: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+
+    state.lastRefreshTime = Date.now();
+    updateRefreshTimer();
 }
+
+function updateRefreshTimer() {
+    const updEl = document.getElementById('status-updated');
+    if (!updEl || !state.lastRefreshTime) return;
+    const sec = Math.floor((Date.now() - state.lastRefreshTime) / 1000);
+    let text;
+    if (sec < 10) text = 'just now';
+    else if (sec < 60) text = `${sec}s ago`;
+    else text = `${Math.floor(sec / 60)}m ago`;
+    updEl.querySelector('span').textContent = text;
+}
+
+// Живой таймер — обновляется каждые 10 секунд
+setInterval(updateRefreshTimer, 10_000);
 
 function showTableLoading(show) {
     const btn = document.getElementById('btn-search');
@@ -755,17 +951,10 @@ function showTableEmpty(show) {
 function toggleTheme() {
     const html = document.documentElement;
     const isDark = html.dataset.theme === 'dark';
-    html.dataset.theme = isDark ? 'light' : 'dark';
-    try {
-        chrome.storage.local.set({ 'settings:theme': isDark ? 'light' : 'dark' });
-    } catch (e) {}
-}
-
-async function loadTheme() {
-    const data = await new Promise(r => chrome.storage.local.get('settings:theme', r));
-    if (data['settings:theme']) {
-        document.documentElement.dataset.theme = data['settings:theme'];
-    }
+    const newTheme = isDark ? 'light' : 'dark';
+    html.dataset.theme = newTheme;
+    console.log('[AIDA/UI] Step: toggleTheme →', newTheme);
+    sendToCore('SAVE_SETTINGS', { data: { theme: newTheme } });
 }
 
 // ============================================================
@@ -798,4 +987,6 @@ function esc(str) {
 // Start
 // ============================================================
 
-loadTheme().then(() => init()).catch(console.error);
+init().catch(err => {
+    console.error('[AIDA/UI] init failed:', err);
+});

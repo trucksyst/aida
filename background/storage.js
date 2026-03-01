@@ -1,15 +1,14 @@
 /**
  * AIDA v0.1 — Storage
  * Единое хранилище через chrome.storage.local с namespace-префиксами.
+ * Читает/пишет только Core (и харвестеры — только токены). UI к Storage не обращается.
  *
  * Namespaces:
- *   token:dat          Bearer токен DAT
- *   token:truckstop    Bearer токен Truckstop
- *   work:loads         Массив активных карточек грузов
- *   settings:user      Настройки диспетчера
- *   settings:openclaw  Настройки OpenClaw агента
- *   saved:bookmarks    Закладки (status=saved)
- *   history:calls      История звонков
+ *   token:dat, token:truckstop  — Bearer токены бордов
+ *   work:loads                  — активные карточки грузов
+ *   settings:user, settings:openclaw, settings:lastSearch, settings:theme
+ *   saved:bookmarks             — закладки
+ *   history:calls               — история звонков
  */
 
 const Storage = {
@@ -53,6 +52,15 @@ const Storage = {
     }
   },
 
+  /** Сохранить worklistItemId у карточки (для синхронизации с бордом DAT). */
+  async setLoadWorklistId(loadId, worklistItemId) {
+    const loads = await this.getLoads();
+    const updated = loads.map(l =>
+      l.id === loadId ? { ...l, worklistItemId } : l
+    );
+    await this.setLoads(updated);
+  },
+
   async clearActive() {
     const loads = await this.getLoads();
     const filtered = loads.filter(l => l.status !== 'active');
@@ -64,7 +72,12 @@ const Storage = {
   // ============================================================
 
   async getSettings() {
-    const data = await chrome.storage.local.get(['settings:user', 'settings:openclaw', 'settings:lastSearch']);
+    const data = await chrome.storage.local.get([
+      'settings:user',
+      'settings:openclaw',
+      'settings:lastSearch',
+      'settings:theme'
+    ]);
     return {
       user: data['settings:user'] || {},
       openclaw: data['settings:openclaw'] || {
@@ -73,15 +86,19 @@ const Storage = {
         interval: 5000,
         enabled: false
       },
-      lastSearch: data['settings:lastSearch'] || null
+      lastSearch: data['settings:lastSearch'] || null,
+      theme: data['settings:theme'] || 'light'
     };
   },
 
   async saveSettings(data) {
+    if (!data || typeof data !== 'object') return;
     const updates = {};
     if (data.user !== undefined) updates['settings:user'] = data.user;
     if (data.openclaw !== undefined) updates['settings:openclaw'] = data.openclaw;
     if (data.lastSearch !== undefined) updates['settings:lastSearch'] = data.lastSearch;
+    if (data.theme !== undefined) updates['settings:theme'] = data.theme;
+    if (Object.keys(updates).length === 0) return;
     await chrome.storage.local.set(updates);
   },
 

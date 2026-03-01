@@ -6,7 +6,8 @@ alwaysApply: true
 # ТЗ и архитектура AIDA
 
 - **Полное ТЗ:** [docs/AIDA_v01_TZ.md](../docs/AIDA_v01_TZ.md) — при любых изменениях сверяться с ним.
-- **Блоки:** UI (SidePanel), Core (background.js), Storage, Harvesters, Adapters, Retell. Каждый блок — свой контракт, без знания внутренностей других.
+- **Блоки:** UI (полноэкранная вкладка расширения, не Side Panel), Core (background.js), Storage, Harvesters, Adapters, Retell. Каждый блок — свой контракт, без знания внутренностей других.
+- **UI по ТЗ:** полноценный лоадборд в отдельной вкладке (как DAT.com); боковая панель не подходит для работы с грузами с 3–5 бордов.
 - **Данные:** UI не читает Storage напрямую — только через Core API (sendMessage). Запись в Storage только через Core.
 - **Формат груза:** нормализованный объект (id, board, origin, destination, equipment, weight, miles, rate, rpm, broker, pickupDate, status, raw). Дедупликация по origin + destination + pickupDate + broker.phone.
 - **Rate limiting:** адаптеры не чаще 1 запроса в 2 сек на борд.

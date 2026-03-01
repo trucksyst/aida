@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIDA — AI Dispatcher</title>
     <link rel="stylesheet" href="components/styles.css">
+    <script src="data/locations.js"></script>
 </head>
 <body>
 
@@ -53,9 +54,10 @@
 
             <!-- Search Panel -->
             <div id="search-panel">
-                <div class="search-field field-origin">
+                <div class="search-field field-origin wrap-autocomplete">
                     <label>Origin</label>
-                    <input type="text" id="origin-city" placeholder="Chicago" autocomplete="off">
+                    <input type="text" id="origin-city" placeholder="Chicago, IL or Z1" autocomplete="off">
+                    <div id="origin-autocomplete" class="location-autocomplete" role="listbox" aria-hidden="true"></div>
                 </div>
                 <div class="search-field field-state">
                     <label>State</label>
@@ -68,9 +70,10 @@
 
                 <div class="search-divider"></div>
 
-                <div class="search-field field-dest">
+                <div class="search-field field-dest wrap-autocomplete">
                     <label>Destination</label>
-                    <input type="text" id="dest-city" placeholder="Dallas" autocomplete="off">
+                    <input type="text" id="dest-city" placeholder="Dallas, TX or Z7" autocomplete="off">
+                    <div id="dest-autocomplete" class="location-autocomplete" role="listbox" aria-hidden="true"></div>
                 </div>
                 <div class="search-field field-dest-st">
                     <label>State</label>
@@ -235,6 +238,9 @@
             </div>
             <div class="status-item" id="status-count">
                 <span>—</span>
+            </div>
+            <div class="status-item" id="status-new" style="display:none;cursor:pointer;color:#16a34a;font-weight:600" title="Click to refresh">
+                <span></span>
             </div>
             <div class="status-item" id="status-updated" style="margin-left:auto">
                 <span></span>
