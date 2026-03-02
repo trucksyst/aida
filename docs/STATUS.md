@@ -19,7 +19,7 @@
 | **Adapter Truckstop** | `background/adapters/truckstop-adapter.js` | ✓ Шаблон (TS_SEARCH_REQUEST_CAPTURED) + fetch из background, геокод Nominatim, нормализация, comments из RAW_FIELD_COMMENTS |
 | **Adapter TruckerPath** | `background/adapters/truckerpath-adapter.js` | ✓ Только данные с вкладки (харвестер), маппинг pickup_locations/drop_offs, pickup.address, trip_details, comments из RAW_FIELD_COMMENTS |
 | **Retell** | `background/retell.js` | ✓ initiateCall, generateEmail (нет телефона → mailto) |
-| **UI** | `ui/sidepanel.html`, `ui/sidepanel.js`, `ui/components/styles.css` | ✓ Полноэкранная вкладка: поиск, таблица грузов, панель деталей, закладки, история, настройки, агент OpenClaw, статус-бар (борды, счётчик, таймер, +N new), тема |
+| **UI** | `ui/app.html`, `ui/app.js`, `ui/components/styles.css` | ✓ Полноэкранная вкладка: поиск, таблица грузов, панель деталей, закладки, история, настройки, агент OpenClaw, статус-бар (борды, счётчик, таймер, +N new), тема |
 
 ### По пунктам ТЗ (раздел 13 — обязательно в v0.1)
 
