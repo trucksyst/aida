@@ -351,11 +351,10 @@ async function handleTruckstopSearchResponse(rawResults) {
 async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} raw cards`);
-    // Показываем ПОЛНЫЙ JSON карточек для анализа
-    console.log('[AIDA/Core] TP ALL RAW CARDS (' + rawResults.length + '):');
-    rawResults.forEach((card, i) => {
-        console.log(`[AIDA/Core] TP card[${i}]:`, JSON.stringify(card));
-    });
+    // Первые 3 карточки — полный JSON для анализа структуры
+    for (let i = 0; i < Math.min(3, rawResults.length); i++) {
+        console.log(`[AIDA/Core] TP raw[${i}] FULL:`, JSON.stringify(rawResults[i]));
+    }
     let loads;
     try {
         loads = normalizeTruckerpathResults(rawResults, {});
@@ -364,10 +363,23 @@ async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
         return;
     }
     if (!loads || loads.length === 0) return;
-    console.log(`[AIDA/Core] TP normalized: ${loads.length} loads`);
-    loads.forEach((l, i) => {
-        console.log(`  [${i}] ${l.origin?.city}, ${l.origin?.state} → ${l.destination?.city}, ${l.destination?.state} | broker: ${l.broker?.name || '❌ EMPTY'} | phone: ${l.broker?.phone || '❌'}`);
-    });
+    // Сравнение raw vs normalized для первых 3
+    for (let i = 0; i < Math.min(3, loads.length); i++) {
+        const raw = rawResults[i];
+        const n = loads[i];
+        console.log(`[AIDA/Core] TP COMPARE[${i}]:`,
+            '\n  RAW broker:', JSON.stringify(raw.broker),
+            '\n  RAW pickup_locations:', JSON.stringify(raw.pickup_locations),
+            '\n  RAW drop_offs_locations:', JSON.stringify(raw.drop_offs_locations),
+            '\n  RAW trip_details:', JSON.stringify(raw.trip_details),
+            '\n  RAW price_total:', raw.price_total, '| distance_total:', raw.distance_total, '| weight:', raw.weight,
+            '\n  NORM origin:', JSON.stringify(n.origin),
+            '\n  NORM dest:', JSON.stringify(n.destination),
+            '\n  NORM broker:', JSON.stringify(n.broker),
+            '\n  NORM rate:', n.rate, '| miles:', n.miles, '| weight:', n.weight
+        );
+    }
+    console.log(`[AIDA/Core] TP total normalized: ${loads.length}`);
     const existing = await Storage.getLoads();
     const merged = mergeLoadsByBoard(existing, loads, 'tp');
     await Storage.setLoads(merged);
