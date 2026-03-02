@@ -237,25 +237,242 @@ const TruckerpathAdapter = {
             origin: params?.origin,
             destination: params?.destination
         });
+
+        // 1) Если есть template — делаем реальный запрос с подставленными параметрами
+        if (template && template.url) {
+            await rateLimit();
+            let body = template.body;
+            try {
+                body = modifyTemplateBody(body, params);
+            } catch (e) {
+                console.warn('[AIDA/TruckerPath] Step: body modify failed, using original:', e?.message);
+            }
+
+            const headers = { ...(template.headers || {}) };
+            if (!headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = 'application/json';
+            if (!headers['Origin']) headers['Origin'] = 'https://loadboard.truckerpath.com';
+            if (!headers['Referer']) headers['Referer'] = 'https://loadboard.truckerpath.com/';
+            if (Array.isArray(template.cookies) && template.cookies.length > 0) {
+                headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
+            }
+
+            try {
+                console.log('[AIDA/TruckerPath] Step: fetch', template.url, 'method:', template.method || 'POST');
+                const resp = await fetch(template.url, {
+                    method: template.method || 'POST',
+                    headers,
+                    credentials: 'include',
+                    body: typeof body === 'string' ? body : JSON.stringify(body)
+                });
+                const text = await resp.text();
+                if (!resp.ok) {
+                    console.warn('[AIDA/TruckerPath] Step: HTTP', resp.status, text?.slice(0, 200));
+                    // Fallback на кэш при ошибке
+                    if (cachedLoads.length > 0) {
+                        console.log('[AIDA/TruckerPath] Falling back to cached loads:', cachedLoads.length);
+                        return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache-fallback' } };
+                    }
+                    return {
+                        ok: false, loads: [], meta: { board: BOARD },
+                        error: { code: 'FETCH_FAILED', message: `HTTP ${resp.status}: ${text?.slice(0, 100)}`, retriable: resp.status >= 500 }
+                    };
+                }
+                if (!text || text.trim().charAt(0) === '<') {
+                    console.warn('[AIDA/TruckerPath] Step: got HTML instead of JSON (auth issue?)');
+                    if (cachedLoads.length > 0) {
+                        return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache-fallback' } };
+                    }
+                    return {
+                        ok: false, loads: [], meta: { board: BOARD },
+                        error: { code: 'HTML_RESPONSE', message: 'TruckerPath returned HTML (login redirect?). Re-login on the tab.', retriable: false }
+                    };
+                }
+                const data = JSON.parse(text);
+                const rawResults = findLoadsInResponse(data);
+                if (!Array.isArray(rawResults) || rawResults.length === 0) {
+                    console.log('[AIDA/TruckerPath] Step: 0 loads in response');
+                    return { ok: true, loads: [], meta: { board: BOARD, source: 'api' } };
+                }
+                console.log('[AIDA/TruckerPath] Step: parsed', rawResults.length, 'loads from API');
+                const loads = normalizeTruckerpathResults(rawResults, params);
+                return { ok: true, loads, meta: { board: BOARD, source: 'api' } };
+            } catch (e) {
+                console.warn('[AIDA/TruckerPath] Step: fetch error:', e?.message);
+                // Fallback на кэш
+                if (cachedLoads.length > 0) {
+                    return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache-fallback' } };
+                }
+                return {
+                    ok: false, loads: [], meta: { board: BOARD },
+                    error: { code: 'NETWORK_ERROR', message: e?.message || 'Network error', retriable: true }
+                };
+            }
+        }
+
+        // 2) Нет template — если есть кэш, вернём его (грузы от харвестера)
         if (cachedLoads.length > 0) {
-            console.log('[AIDA/TruckerPath] Using cached loads from harvester:', cachedLoads.length);
+            console.log('[AIDA/TruckerPath] No template, using cached loads:', cachedLoads.length);
             return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache' } };
         }
-        if (!template || !template.url) {
-            console.warn('[AIDA/TruckerPath] No template: run search on TruckerPath tab once to capture request');
-            return {
-                ok: false, loads: [], meta: { board: BOARD, source: 'template' },
-                error: { code: 'NO_TEMPLATE', message: 'TruckerPath request template not captured; run search on TruckerPath tab once', retriable: false }
-            };
-        }
-        await rateLimit();
-        console.log('[AIDA/TruckerPath] Template present, no cached loads — results come when user searches on TruckerPath tab');
+
+        // 3) Совсем ничего
+        console.warn('[AIDA/TruckerPath] No template and no cached loads');
         return {
-            ok: false, loads: [], meta: { board: BOARD, source: 'template' },
-            error: { code: 'NEED_PAGE_CONTEXT', message: 'TruckerPath template flow requires page context results', retriable: false }
+            ok: false, loads: [], meta: { board: BOARD },
+            error: { code: 'NO_TEMPLATE', message: 'Open TruckerPath tab and run a search there to capture request template', retriable: false }
         };
     }
 };
+
+/**
+ * Подставить новые параметры поиска в captured body (GraphQL или REST).
+ * Структуры TP: { variables: { ... } } или { operationName, query, variables }.
+ * Также пробуем плоскую структуру (REST body с ключами origin, destination итд).
+ */
+function modifyTemplateBody(body, params) {
+    if (!body || !params) return body;
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+    if (!parsed || typeof parsed !== 'object') return body;
+
+    let modified = false;
+
+    // GraphQL-стиль: { variables: { ... } }
+    if (parsed.variables && typeof parsed.variables === 'object') {
+        const vars = parsed.variables;
+        modified = patchSearchParams(vars, params) || modified;
+        // Вложенные args: { variables: { args: { ... } } }
+        if (vars.args && typeof vars.args === 'object') {
+            modified = patchSearchParams(vars.args, params) || modified;
+        }
+        // Input pattern: { variables: { input: { ... } } }
+        if (vars.input && typeof vars.input === 'object') {
+            modified = patchSearchParams(vars.input, params) || modified;
+        }
+    }
+
+    // REST-стиль (плоская структура)
+    if (!parsed.variables) {
+        modified = patchSearchParams(parsed, params) || modified;
+    }
+
+    if (modified) {
+        console.log('[AIDA/TruckerPath] Step: modified template body with new search params');
+        return JSON.stringify(parsed);
+    }
+    return typeof body === 'string' ? body : JSON.stringify(parsed);
+}
+
+/** Подставить origin/destination/radius/dates/equipment в объект. */
+function patchSearchParams(target, params) {
+    if (!target || typeof target !== 'object') return false;
+    let modified = false;
+
+    // Origin: lat/lon или city/state
+    if (params.origin) {
+        // Lat/lon ключи
+        const latKeys = ['latitude', 'lat', 'origin_lat', 'dh_origin_lat', 'originLatitude', 'pickup_lat'];
+        const lonKeys = ['longitude', 'lon', 'lng', 'origin_lon', 'dh_origin_lon', 'originLongitude', 'pickup_lon'];
+        for (const k of latKeys) { if (target[k] !== undefined) { target[k] = null; } }
+        for (const k of lonKeys) { if (target[k] !== undefined) { target[k] = null; } }
+
+        // City / state ключи
+        const cityKeys = ['city', 'originCity', 'origin_city', 'pickup_city'];
+        const stateKeys = ['state', 'originState', 'origin_state', 'pickup_state'];
+        for (const k of cityKeys) {
+            if (target[k] !== undefined) { target[k] = params.origin.city || ''; modified = true; }
+        }
+        for (const k of stateKeys) {
+            if (target[k] !== undefined) { target[k] = params.origin.state || ''; modified = true; }
+        }
+
+        // Вложенный origin объект
+        if (target.origin && typeof target.origin === 'object') {
+            if (target.origin.city !== undefined) { target.origin.city = params.origin.city || ''; modified = true; }
+            if (target.origin.state !== undefined) { target.origin.state = params.origin.state || ''; modified = true; }
+            if (target.origin.zip !== undefined) { target.origin.zip = params.origin.zip || ''; modified = true; }
+        }
+        if (target.pickupLocation && typeof target.pickupLocation === 'object') {
+            if (target.pickupLocation.city !== undefined) { target.pickupLocation.city = params.origin.city || ''; modified = true; }
+            if (target.pickupLocation.state !== undefined) { target.pickupLocation.state = params.origin.state || ''; modified = true; }
+        }
+    }
+
+    // Destination
+    if (params.destination && (params.destination.city || params.destination.state)) {
+        const destCityKeys = ['destCity', 'destinationCity', 'destination_city', 'dropoff_city'];
+        const destStateKeys = ['destState', 'destinationState', 'destination_state', 'dropoff_state'];
+        for (const k of destCityKeys) {
+            if (target[k] !== undefined) { target[k] = params.destination.city || ''; modified = true; }
+        }
+        for (const k of destStateKeys) {
+            if (target[k] !== undefined) { target[k] = params.destination.state || ''; modified = true; }
+        }
+        if (target.destination && typeof target.destination === 'object') {
+            if (target.destination.city !== undefined) { target.destination.city = params.destination.city || ''; modified = true; }
+            if (target.destination.state !== undefined) { target.destination.state = params.destination.state || ''; modified = true; }
+        }
+        if (target.dropoffLocation && typeof target.dropoffLocation === 'object') {
+            if (target.dropoffLocation.city !== undefined) { target.dropoffLocation.city = params.destination.city || ''; modified = true; }
+            if (target.dropoffLocation.state !== undefined) { target.dropoffLocation.state = params.destination.state || ''; modified = true; }
+        }
+    }
+
+    // Radius
+    const radiusKeys = ['radius', 'origin_radius', 'searchRadius', 'pickup_radius'];
+    if (params.radius != null) {
+        for (const k of radiusKeys) {
+            if (target[k] !== undefined) { target[k] = Number(params.radius) || 100; modified = true; }
+        }
+    }
+
+    // Dates
+    if (params.dateFrom) {
+        const dateFromKeys = ['dateFrom', 'pickup_date_begin', 'pickupDateFrom', 'startDate', 'availableFrom'];
+        for (const k of dateFromKeys) {
+            if (target[k] !== undefined) { target[k] = String(params.dateFrom).slice(0, 10); modified = true; }
+        }
+    }
+    if (params.dateTo) {
+        const dateToKeys = ['dateTo', 'pickup_date_end', 'pickupDateTo', 'endDate', 'availableTo'];
+        for (const k of dateToKeys) {
+            if (target[k] !== undefined) { target[k] = String(params.dateTo).slice(0, 10); modified = true; }
+        }
+    }
+
+    // Equipment
+    if (params.equipment) {
+        const equipKeys = ['equipment', 'equipmentType', 'trailer', 'trailerType'];
+        for (const k of equipKeys) {
+            if (target[k] !== undefined) { target[k] = params.equipment; modified = true; }
+        }
+    }
+
+    return modified;
+}
+
+/** Найти массив грузов в ответе API (GraphQL или REST). */
+function findLoadsInResponse(data) {
+    if (!data || typeof data !== 'object') return null;
+    if (Array.isArray(data) && data.length > 0) return data;
+    // Стандартные ключи
+    const keys = ['loads', 'results', 'items', 'records', 'data', 'edges', 'nodes'];
+    for (const key of keys) {
+        const val = data[key];
+        if (Array.isArray(val) && val.length > 0) return val;
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+            const inner = findLoadsInResponse(val);
+            if (inner) return inner;
+        }
+    }
+    // GraphQL: data.data.xxx
+    if (data.data && typeof data.data === 'object') {
+        for (const k in data.data) {
+            const v = data.data[k];
+            if (Array.isArray(v) && v.length > 0) return v;
+        }
+    }
+    return null;
+}
 
 export default TruckerpathAdapter;
 export { normalizeTruckerpathResults };
