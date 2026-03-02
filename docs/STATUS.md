@@ -119,15 +119,15 @@ Git checkpoint: `fb9bdd2` («checkpoint: before bugfix audit 2026-03-02»)
 | 2 | Truckstop бейдж: CSS класс `.ts` ≠ board value `truckstop` — бейджи без стилей | styles.css | 🔴 Высокий | ✅ Исправлено |
 | 3 | `pruneHistory()` — race condition: два цикла getLoads/setLoads, данные могут затереться | storage.js | 🟡 Средний | ✅ Исправлено |
 | 4 | Ошибки адаптеров TS/TP проглатываются, не доходят до UI | background.js | 🟡 Средний | ✅ Исправлено |
-| 5 | Race condition при save settings (read-modify-write без блокировки) | sidepanel.js | 🟡 Средний | ✅ Исправлено |
+| 5 | Race condition при save settings (read-modify-write без блокировки) | app.js | 🟡 Средний | ✅ Исправлено |
 | 6 | `REMOVE_BOOKMARK` — нет `.catch()`, UI может зависнуть | background.js | 🟡 Средний | ✅ Исправлено |
 | 7 | `TOGGLE_AGENT` — нет `return true` для async-цепочки | background.js | 🟡 Средний | ✅ Исправлено |
 | 8 | `pushToUI()` — неиспользуемая переменная `keys` (мёртвый код) | background.js | 🟢 Низкий | ✅ Исправлено |
 | 9 | Нет стилей `emailed`/`replied` в тёмной теме | styles.css | 🟢 Низкий | ✅ Исправлено |
-| 10 | TruckerPath нет в статус-баре | sidepanel.html + sidepanel.js | 🟢 Низкий | ✅ Исправлено |
+| 10 | TruckerPath нет в статус-баре | app.html + app.js | 🟢 Низкий | ✅ Исправлено |
 | 11 | Keep-alive alarm работает постоянно, даже без SSE | background.js | 🟢 Низкий | ✅ Исправлено |
-| 12 | `board.toUpperCase()` без null-check → падение с undefined | sidepanel.js | 🟢 Низкий | ✅ Исправлено |
-| 13 | Equipment select ограничен 3 типами, DAT поддерживает 9 | sidepanel.html | 🟢 Низкий | ✅ Исправлено |
+| 12 | `board.toUpperCase()` без null-check → падение с undefined | app.js | 🟢 Низкий | ✅ Исправлено |
+| 13 | Equipment select ограничен 3 типами, DAT поддерживает 9 | app.html | 🟢 Низкий | ✅ Исправлено |
 
 ---
 
@@ -173,8 +173,8 @@ aida/
 │   ├── harvester-truckstop.js ← Token + Search intercept (truckstop.com)
 │   └── harvester-truckerpath.js ← Token + Search intercept (truckerpath.com)
 ├── ui/
-│   ├── sidepanel.html         ← Layout
-│   ├── sidepanel.js           ← UI controller
+│   ├── app.html         ← Layout
+│   ├── app.js           ← UI controller
 │   ├── components/styles.css  ← Стили
 │   └── data/locations.js      ← Автоподстановка городов
 ├── scripts/

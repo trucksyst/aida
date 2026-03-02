@@ -351,7 +351,16 @@ async function handleTruckstopSearchResponse(rawResults) {
 async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} raw cards`);
-    console.log('[AIDA/Core] TP card[0]:', rawResults[0]);
+    // Показываем ВСЕ карточки с broker-полями для анализа
+    console.log('[AIDA/Core] TP ALL CARDS:');
+    rawResults.forEach((card, i) => {
+        const b = card.broker || {};
+        console.log(`  [${i}] broker:`, JSON.stringify(b),
+            '| origin:', card.pickup_locations?.[0]?.city || card.origin?.city || card.originCity || '???',
+            '| dest:', card.drop_offs_locations?.[0]?.city || card.destination?.city || card.destinationCity || '???',
+            '| price:', card.price_total || card.price || '—'
+        );
+    });
     let loads;
     try {
         loads = normalizeTruckerpathResults(rawResults, {});
@@ -360,7 +369,10 @@ async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
         return;
     }
     if (!loads || loads.length === 0) return;
-    console.log(`[AIDA/Core] TP normalized: ${loads.length} loads, origin: ${loads[0]?.origin?.city}, ${loads[0]?.origin?.state} → ${loads[0]?.destination?.city}, ${loads[0]?.destination?.state}`);
+    console.log(`[AIDA/Core] TP normalized: ${loads.length} loads`);
+    loads.forEach((l, i) => {
+        console.log(`  [${i}] ${l.origin?.city}, ${l.origin?.state} → ${l.destination?.city}, ${l.destination?.state} | broker: ${l.broker?.name || '❌ EMPTY'} | phone: ${l.broker?.phone || '❌'}`);
+    });
     const existing = await Storage.getLoads();
     const merged = mergeLoadsByBoard(existing, loads, 'tp');
     await Storage.setLoads(merged);
