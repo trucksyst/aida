@@ -105,8 +105,8 @@ function applySettings(settings) {
     document.getElementById('agent-toggle').checked = state.agentEnabled;
     updateAgentStatus();
 
-    // Статус бордов и тема приходят из Core (GET_SETTINGS), не из Storage
-    state.boardStatus = settings.boardStatus || { dat: false, truckstop: false };
+    // Статус бордов: объект { connected, hasToken, tabOpen, disabled } для каждого борда
+    state.boardStatus = settings.boardStatus || {};
     if (settings.theme) document.documentElement.dataset.theme = settings.theme;
     updateBoardDots();
 }
@@ -352,6 +352,16 @@ function bindEvents() {
     document.getElementById('agent-toggle').addEventListener('change', (e) => {
         toggleAgent(e.target.checked);
     });
+
+    // Board toggle buttons
+    document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const board = btn.dataset.board;
+            const bs = state.boardStatus[board] || {};
+            const currentlyDisabled = !!bs.disabled;
+            toggleBoard(board, currentlyDisabled); // toggle: если disabled → enable, и наоборот
+        });
+    });
 }
 
 // ============================================================
@@ -416,7 +426,9 @@ async function doSearch() {
             if (loads.length > 0) {
                 showToast(`Found ${loads.length} loads`);
             } else {
-                if (!state.boardStatus.dat && !state.boardStatus.truckstop) {
+                const bs = state.boardStatus || {};
+                const anyConnected = Object.values(bs).some(b => typeof b === 'object' ? b.connected : !!b);
+                if (!anyConnected) {
                     showToast('No board connected. Open one.dat.com in another tab, sign in and search there, then try here again.', 'error');
                 } else {
                     showToast('No loads found for this search.', 'error');
@@ -460,9 +472,9 @@ function getSearchParams() {
 // ============================================================
 
 function getEmptyMessage() {
-    const hasDat = state.boardStatus.dat;
-    const hasTs = state.boardStatus.truckstop;
-    if (!hasDat && !hasTs) {
+    const bs = state.boardStatus || {};
+    const anyConnected = Object.values(bs).some(b => typeof b === 'object' ? b.connected : !!b);
+    if (!anyConnected) {
         return 'Connect a board first: Open one.dat.com in another tab, sign in, and run a search there. AIDA will capture the connection. Then return here and click Search.';
     }
     return 'No loads found. Enter search params and click Search, or try different filters.';
@@ -877,15 +889,38 @@ function updateAgentStatus() {
 // Status Bar
 // ============================================================
 
-/** Обновить индикаторы бордов (точки) по state.boardStatus. Данные приходят из Core (GET_SETTINGS / DATA_UPDATED). */
+/** Обновить кнопки-индикаторы бордов по state.boardStatus. */
 function updateBoardDots() {
-    const dotDat = document.getElementById('dot-dat');
-    const dotTs = document.getElementById('dot-ts');
-    const dotTp = document.getElementById('dot-tp');
+    const boards = ['dat', 'truckstop', 'tp'];
+    for (const board of boards) {
+        const btn = document.getElementById(`board-btn-${board}`);
+        if (!btn) continue;
+        const bs = state.boardStatus[board];
+        // boardStatus может быть старый формат (boolean) или новый ({connected, hasToken, tabOpen, disabled})
+        const isOldFormat = typeof bs === 'boolean' || bs === undefined;
+        const connected = isOldFormat ? !!bs : !!bs?.connected;
+        const hasToken = isOldFormat ? !!bs : !!bs?.hasToken;
+        const disabled = isOldFormat ? false : !!bs?.disabled;
 
-    if (dotDat) dotDat.classList.toggle('online', !!state.boardStatus.dat);
-    if (dotTs) dotTs.classList.toggle('online', !!state.boardStatus.truckstop);
-    if (dotTp) dotTp.classList.toggle('online', !!state.boardStatus.tp);
+        btn.classList.remove('connected', 'has-token', 'disabled');
+        if (disabled) {
+            btn.classList.add('disabled');
+            btn.title = `${board.toUpperCase()} — отключён (клик для включения)`;
+        } else if (connected) {
+            btn.classList.add('connected');
+            btn.title = `${board.toUpperCase()} — подключён (клик для отключения)`;
+        } else if (hasToken) {
+            btn.classList.add('has-token');
+            btn.title = `${board.toUpperCase()} — токен есть, вкладка закрыта (клик для отключения)`;
+        } else {
+            btn.title = `${board.toUpperCase()} — не подключён (откройте вкладку борда)`;
+        }
+    }
+}
+
+async function toggleBoard(board, enable) {
+    await sendToCore('TOGGLE_BOARD', { board, enabled: enable });
+    // Состояние обновится через DATA_UPDATED push
 }
 
 // ============================================================

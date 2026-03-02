@@ -53,15 +53,46 @@ function mergeLoadsByBoard(existing, newLoads, board) {
     return deduplicateLoads([...(other || []), ...((newLoads || []))]);
 }
 
-/** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (по токенам). */
+/** Проверить, открыта ли вкладка борда. */
+async function isBoardTabOpen(board) {
+    const patterns = {
+        dat: ['https://one.dat.com/*', 'https://power.dat.com/*'],
+        truckstop: ['https://*.truckstop.com/*'],
+        tp: ['https://loadboard.truckerpath.com/*']
+    };
+    const urls = patterns[board];
+    if (!urls) return false;
+    try {
+        const tabs = await chrome.tabs.query({ url: urls });
+        return tabs.length > 0;
+    } catch {
+        return false;
+    }
+}
+
+/** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (по токенам + вкладкам). */
 async function getSettingsForUI() {
     const settings = await Storage.getSettings();
     const datToken = await Storage.getToken('dat');
     const tsToken = await Storage.getToken('truckstop');
     const tpConnected = !!settings?.truckerpathRequestTemplate;
+
+    // Реальная проверка: токен есть И вкладка открыта
+    const [datTabOpen, tsTabOpen, tpTabOpen] = await Promise.all([
+        isBoardTabOpen('dat'),
+        isBoardTabOpen('truckstop'),
+        isBoardTabOpen('tp')
+    ]);
+
+    const disabledBoards = settings.disabledBoards || {};
+
     return {
         ...settings,
-        boardStatus: { dat: !!datToken, truckstop: !!tsToken, tp: tpConnected }
+        boardStatus: {
+            dat: { connected: !!datToken && datTabOpen, hasToken: !!datToken, tabOpen: datTabOpen, disabled: !!disabledBoards.dat },
+            truckstop: { connected: !!tsToken && tsTabOpen, hasToken: !!tsToken, tabOpen: tsTabOpen, disabled: !!disabledBoards.truckstop },
+            tp: { connected: tpConnected && tpTabOpen, hasToken: tpConnected, tabOpen: tpTabOpen, disabled: !!disabledBoards.tp }
+        }
     };
 }
 
@@ -71,7 +102,7 @@ async function pushToUI(payload) {
     try {
         const tabs = await chrome.tabs.query({ url: AIDA_UI_URL + '*' });
         for (const tab of tabs) {
-            chrome.tabs.sendMessage(tab.id, { type: 'DATA_UPDATED', payload }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { type: 'DATA_UPDATED', payload }).catch(() => { });
         }
     } catch (e) {
         console.warn('[AIDA/Core] pushToUI failed:', e.message);
@@ -212,6 +243,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: true });
             return true;
 
+        case 'TOGGLE_BOARD': {
+            const { board, enabled } = message;
+            Storage.getSettings().then(async settings => {
+                const disabledBoards = settings.disabledBoards || {};
+                disabledBoards[board] = !enabled;
+                await Storage.saveSettings({ disabledBoards });
+                await pushToUI({ settings: await getSettingsForUI() });
+                sendResponse({ ok: true });
+            }).catch(err => sendResponse({ error: err.message }));
+            return true;
+        }
+
         case 'GET_LOADS':
             Storage.getLoads().then(loads => {
                 sendResponse({ loads });
@@ -336,7 +379,7 @@ async function handleTruckstopRequestCaptured(msg) {
         const mainCookies = await chrome.cookies.getAll({ domain: 'main.truckstop.com' });
         const apiCookies = await chrome.cookies.getAll({ domain: 'loadsearch-graphql-api-prod.truckstop.com' });
         cookies = [...tsCookies, ...mainCookies, ...apiCookies];
-    } catch (_) {}
+    } catch (_) { }
     template.cookies = cookies;
     await Storage.saveSettings({ truckstopRequestTemplate: template });
 }
@@ -355,7 +398,7 @@ async function handleTruckerpathRequestCaptured(msg) {
         const a = await chrome.cookies.getAll({ domain: 'loadboard.truckerpath.com' });
         const b = await chrome.cookies.getAll({ domain: 'truckerpath.com' });
         cookies = [...a, ...b];
-    } catch (_) {}
+    } catch (_) { }
     template.cookies = cookies;
     await Storage.saveSettings({ truckerpathRequestTemplate: template });
 }
@@ -404,11 +447,14 @@ async function searchLoads(params) {
     const tpTemplate = settings?.truckerpathRequestTemplate || null;
     const existing = await Storage.getLoads();
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
+    const disabled = settings.disabledBoards || {};
 
+    // Отключённые борды не участвуют в поиске
+    const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
-        DatAdapter.search(params),
-        TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate }),
-        TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
+        disabled.dat ? Promise.resolve(skipResult) : DatAdapter.search(params),
+        disabled.truckstop ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate }),
+        disabled.tp ? Promise.resolve(skipResult) : TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
     // Логируем ошибки адаптеров (не проглатываем молча)
@@ -539,7 +585,7 @@ function stopLiveQuery() {
     _liveQueryNewCount = 0;
     _liveQueryParams = null;
     // Отключаем keep-alive когда SSE не активен
-    chrome.alarms.clear('aida-keepalive').catch(() => {});
+    chrome.alarms.clear('aida-keepalive').catch(() => { });
 }
 
 // ============================================================
@@ -798,8 +844,19 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 
     // Не запускаем searchLoads автоматически: грузы уже приходят от харвестера (handleDatSearchResponse).
-    // Автопоиск через адаптеры часто возвращал 0 и перезаписывал грузы пустым массивом — они исчезали.
     // Повторный поиск — только по кнопке Search во вкладке AIDA.
+
+    // Обновляем статус бордов для UI (вкладка борда открылась)
+    pushToUI({ settings: await getSettingsForUI() }).catch(() => { });
+});
+
+// При закрытии любой вкладки — проверяем, не был ли это борд, и обновляем статус
+chrome.tabs.onRemoved.addListener(async () => {
+    try {
+        // Небольшая задержка, чтобы chrome.tabs.query вернул актуальные данные
+        await new Promise(r => setTimeout(r, 300));
+        await pushToUI({ settings: await getSettingsForUI() });
+    } catch { }
 });
 
 // ============================================================

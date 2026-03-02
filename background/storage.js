@@ -81,7 +81,8 @@ const Storage = {
       'settings:lastSearch',
       'settings:theme',
       'settings:truckstopRequestTemplate',
-      'settings:truckerpathRequestTemplate'
+      'settings:truckerpathRequestTemplate',
+      'settings:disabledBoards'
     ]);
     return {
       user: data['settings:user'] || {},
@@ -94,7 +95,8 @@ const Storage = {
       lastSearch: data['settings:lastSearch'] || null,
       theme: data['settings:theme'] || 'light',
       truckstopRequestTemplate: data['settings:truckstopRequestTemplate'] || null,
-      truckerpathRequestTemplate: data['settings:truckerpathRequestTemplate'] || null
+      truckerpathRequestTemplate: data['settings:truckerpathRequestTemplate'] || null,
+      disabledBoards: data['settings:disabledBoards'] || {}
     };
   },
 
@@ -107,6 +109,7 @@ const Storage = {
     if (data.theme !== undefined) updates['settings:theme'] = data.theme;
     if (data.truckstopRequestTemplate !== undefined) updates['settings:truckstopRequestTemplate'] = data.truckstopRequestTemplate;
     if (data.truckerpathRequestTemplate !== undefined) updates['settings:truckerpathRequestTemplate'] = data.truckerpathRequestTemplate;
+    if (data.disabledBoards !== undefined) updates['settings:disabledBoards'] = data.disabledBoards;
     if (Object.keys(updates).length === 0) return;
     await chrome.storage.local.set(updates);
   },
