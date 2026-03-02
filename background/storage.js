@@ -4,11 +4,14 @@
  * Читает/пишет только Core (и харвестеры — только токены). UI к Storage не обращается.
  *
  * Namespaces:
- *   token:dat, token:truckstop  — Bearer токены бордов
- *   work:loads                  — активные карточки грузов
+ *   token:dat, token:truckstop       — Bearer токены бордов
+ *   work:loads                       — активные карточки грузов
  *   settings:user, settings:openclaw, settings:lastSearch, settings:theme
- *   saved:bookmarks             — закладки
- *   history:calls               — история звонков
+ *   settings:truckstopRequestTemplate, settings:truckerpathRequestTemplate — шаблоны запросов + куки (до следующего перехвата)
+ *   saved:bookmarks                  — закладки
+ *   history:calls                    — история звонков
+ *
+ * Токены и шаблоны (с куки) сохраняются до следующего перехвата на вкладке борда или до переустановки расширения; не сбрасываются при закрытии вкладки.
  */
 
 const Storage = {
@@ -76,7 +79,9 @@ const Storage = {
       'settings:user',
       'settings:openclaw',
       'settings:lastSearch',
-      'settings:theme'
+      'settings:theme',
+      'settings:truckstopRequestTemplate',
+      'settings:truckerpathRequestTemplate'
     ]);
     return {
       user: data['settings:user'] || {},
@@ -87,7 +92,9 @@ const Storage = {
         enabled: false
       },
       lastSearch: data['settings:lastSearch'] || null,
-      theme: data['settings:theme'] || 'light'
+      theme: data['settings:theme'] || 'light',
+      truckstopRequestTemplate: data['settings:truckstopRequestTemplate'] || null,
+      truckerpathRequestTemplate: data['settings:truckerpathRequestTemplate'] || null
     };
   },
 
@@ -98,6 +105,8 @@ const Storage = {
     if (data.openclaw !== undefined) updates['settings:openclaw'] = data.openclaw;
     if (data.lastSearch !== undefined) updates['settings:lastSearch'] = data.lastSearch;
     if (data.theme !== undefined) updates['settings:theme'] = data.theme;
+    if (data.truckstopRequestTemplate !== undefined) updates['settings:truckstopRequestTemplate'] = data.truckstopRequestTemplate;
+    if (data.truckerpathRequestTemplate !== undefined) updates['settings:truckerpathRequestTemplate'] = data.truckerpathRequestTemplate;
     if (Object.keys(updates).length === 0) return;
     await chrome.storage.local.set(updates);
   },

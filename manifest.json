@@ -19,7 +19,8 @@
     "storage",
     "tabs",
     "scripting",
-    "alarms"
+    "alarms",
+    "cookies"
   ],
 
   "host_permissions": [
@@ -28,8 +29,12 @@
     "https://freight.api.prod.dat.com/*",
     "https://identity.api.dat.com/*",
     "https://www.truckstop.com/*",
+    "https://main.truckstop.com/*",
     "https://api.truckstop.com/*",
     "https://truckstop.com/*",
+    "https://loadsearch-graphql-api-prod.truckstop.com/*",
+    "https://loadboard.truckerpath.com/*",
+    "https://api.truckerpath.com/*",
     "https://api.retellai.com/*",
     "https://nominatim.openstreetmap.org/*"
   ],
@@ -40,7 +45,9 @@
       "matches": [
         "https://one.dat.com/*",
         "https://www.truckstop.com/*",
-        "https://truckstop.com/*"
+        "https://main.truckstop.com/*",
+        "https://truckstop.com/*",
+        "https://loadboard.truckerpath.com/*"
       ],
       "run_at": "document_start"
     },
@@ -54,7 +61,16 @@
       "js": ["harvesters/harvester-truckstop.js"],
       "matches": [
         "https://www.truckstop.com/*",
+        "https://main.truckstop.com/*",
         "https://truckstop.com/*"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "js": ["harvesters/harvester-truckerpath.js"],
+      "matches": [
+        "https://loadboard.truckerpath.com/*"
       ],
       "run_at": "document_start",
       "world": "MAIN"

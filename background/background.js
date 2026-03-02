@@ -22,7 +22,8 @@
 import Storage from './storage.js';
 import Retell from './retell.js';
 import DatAdapter, { normalizeDatResults } from './adapters/dat-adapter.js';
-import TruckstopAdapter from './adapters/truckstop-adapter.js';
+import TruckstopAdapter, { normalizeTruckstopResults } from './adapters/truckstop-adapter.js';
+import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truckerpath-adapter.js';
 
 // ============================================================
 // Открытие UI в полноэкранной вкладке (не Side Panel)
@@ -30,14 +31,37 @@ import TruckstopAdapter from './adapters/truckstop-adapter.js';
 
 const AIDA_UI_URL = chrome.runtime.getURL('ui/sidepanel.html');
 
+/** Дедупликация по origin+destination+pickupDate+broker.phone. */
+function deduplicateLoads(loads) {
+    const seen = new Set();
+    return (loads || []).filter(l => {
+        const key = [
+            l.origin?.zip || l.origin?.city,
+            l.destination?.zip || l.destination?.city,
+            l.pickupDate,
+            l.broker?.phone
+        ].join('|');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+/** Мерж: заменяем только грузы конкретного борда, остальные сохраняем. */
+function mergeLoadsByBoard(existing, newLoads, board) {
+    const other = (existing || []).filter(l => l.board !== board);
+    return deduplicateLoads([...(other || []), ...((newLoads || []))]);
+}
+
 /** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (по токенам). */
 async function getSettingsForUI() {
     const settings = await Storage.getSettings();
     const datToken = await Storage.getToken('dat');
     const tsToken = await Storage.getToken('truckstop');
+    const tpConnected = !!settings?.truckerpathRequestTemplate;
     return {
         ...settings,
-        boardStatus: { dat: !!datToken, truckstop: !!tsToken }
+        boardStatus: { dat: !!datToken, truckstop: !!tsToken, tp: tpConnected }
     };
 }
 
@@ -50,23 +74,19 @@ async function pushToUI(payload) {
             chrome.tabs.sendMessage(tab.id, { type: 'DATA_UPDATED', payload }).catch(() => {});
         }
         const keys = Object.keys(payload).filter(k => payload[k] !== undefined);
-        if (keys.length) console.log('[AIDA/Core] Step: pushToUI →', keys.join(', '), 'tabs:', tabs.length);
     } catch (e) {
         console.warn('[AIDA/Core] pushToUI failed:', e.message);
     }
 }
 
 async function openAidaInTab(windowId) {
-    console.log('[AIDA/Core] Step: openAidaInTab', windowId);
     try {
         const existing = await chrome.tabs.query({ windowId, url: AIDA_UI_URL + '*' });
         if (existing.length > 0) {
             await chrome.tabs.update(existing[0].id, { active: true });
-            console.log('[AIDA/Core] Step: AIDA tab focused');
             return;
         }
         await chrome.tabs.create({ url: AIDA_UI_URL, windowId });
-        console.log('[AIDA/Core] Step: AIDA tab created');
     } catch (e) {
         console.warn('[AIDA/Core] openAidaInTab failed:', e.message);
     }
@@ -86,7 +106,6 @@ chrome.action.onClicked.addListener(async (tab) => {
         await openAidaInTab(windowId);
     } else {
         await chrome.tabs.create({ url: AIDA_UI_URL });
-        console.log('[AIDA/Core] Step: AIDA tab created (no windowId)');
     }
 });
 
@@ -96,7 +115,6 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { type } = message;
-    console.log('[AIDA/Core] Step: message received', type);
 
     switch (type) {
         // ----- Харвестеры -----
@@ -106,8 +124,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             break;
 
         case 'DAT_SEARCH_RESPONSE':
-            console.log('[AIDA/Core] Step: DAT_SEARCH_RESPONSE → handleDatSearchResponse');
             handleDatSearchResponse(message.results, message.searchId, message.token).catch(console.error);
+            sendResponse({ ok: true });
+            break;
+
+        case 'TS_SEARCH_RESPONSE':
+            handleTruckstopSearchResponse(message.results, message.token).catch(console.error);
+            sendResponse({ ok: true });
+            break;
+
+        case 'TS_SEARCH_REQUEST_CAPTURED':
+            handleTruckstopRequestCaptured(message).catch(console.error);
+            sendResponse({ ok: true });
+            break;
+
+        case 'TP_SEARCH_RESPONSE':
+            handleTruckerpathSearchResponse(message.results).catch(console.error);
+            sendResponse({ ok: true });
+            break;
+
+        case 'TP_SEARCH_REQUEST_CAPTURED':
+            handleTruckerpathRequestCaptured(message).catch(console.error);
             sendResponse({ ok: true });
             break;
 
@@ -124,14 +161,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse({ error: 'Enter origin city or state' });
                 return true;
             }
-            console.log('[AIDA/Core] Step: SEARCH_LOADS params', JSON.stringify({
-                origin: params.origin,
-                destination: params.destination,
-                radius: params.radius,
-                equipment: params.equipment,
-                dateFrom: params.dateFrom,
-                dateTo: params.dateTo
-            }));
             searchLoads(params).then(sendResponse).catch(err => {
                 console.error('[AIDA/Core] searchLoads error:', err);
                 sendResponse({ error: err.message });
@@ -142,7 +171,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'CLEAR_ACTIVE':
             Storage.clearActive().then(async () => {
                 await pushToUI({ loads: await Storage.getLoads() });
-                console.log('[AIDA/Core] Step: CLEAR_ACTIVE done → pushToUI(loads)');
                 sendResponse({ ok: true });
             });
             return true;
@@ -168,15 +196,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case 'GET_SETTINGS':
-            getSettingsForUI().then(settings => {
-                console.log('[AIDA/Core] Step: GET_SETTINGS → ok (boardStatus, theme в ответе)');
-                sendResponse({ settings });
-            });
+            getSettingsForUI().then(settings => sendResponse({ settings }));
             return true;
 
         case 'SAVE_SETTINGS':
             Storage.saveSettings(message.data).then(async () => {
-                console.log('[AIDA/Core] Step: SAVE_SETTINGS → ok');
                 await pushToUI({ settings: await getSettingsForUI() });
                 sendResponse({ ok: true });
             });
@@ -189,7 +213,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'GET_LOADS':
             Storage.getLoads().then(loads => {
-                console.log('[AIDA/Core] Step: GET_LOADS → returning', loads?.length ?? 0, 'loads');
                 sendResponse({ loads });
             });
             return true;
@@ -202,7 +225,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             Storage.updateLoadStatus(message.loadId, message.status)
                 .then(async () => {
                     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
-                    console.log('[AIDA/Core] Step: UPDATE_LOAD_STATUS done → pushToUI');
                     sendResponse({ ok: true });
                 });
             return true;
@@ -214,7 +236,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     sendResponse({ error: 'No previous search to refresh' });
                     return;
                 }
-                console.log('[AIDA/Core] Step: REFRESH_LOADS — re-running last search');
                 _liveQueryNewCount = 0;
                 pushToUI({ newLoadsCount: 0 });
                 try {
@@ -236,15 +257,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ============================================================
 
 async function handleTokenHarvested({ board, token }) {
-    console.log('[AIDA/Core] Step: handleTokenHarvested', board, token ? 'token length ' + token.length : 'no token');
     if (!token) return;
     const existing = await Storage.getToken(board);
-    if (existing === token) {
-        console.log('[AIDA/Core] Step: token unchanged, skip');
-        return;
-    }
+    if (existing === token) return;
     await Storage.setToken(board, token);
-    console.log('[AIDA/Core] Step: Token saved to storage:', board);
     await pushToUI({ settings: await getSettingsForUI() });
 
     if (board === 'dat') {
@@ -253,28 +269,92 @@ async function handleTokenHarvested({ board, token }) {
 }
 
 async function handleDatSearchResponse(rawResults, searchId, token) {
-    console.log('[AIDA/Core] Step: handleDatSearchResponse received', Array.isArray(rawResults) ? rawResults.length : 0, 'raw, searchId:', searchId ? 'yes' : 'no');
     if (!Array.isArray(rawResults) || rawResults.length === 0) {
-        console.warn('[AIDA/Core] Step: handleDatSearchResponse abort — empty or not array', typeof rawResults);
+        console.warn('[AIDA/Core] handleDatSearchResponse: empty or not array');
         return;
     }
+    console.log('[AIDA/Core] DAT raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
     const loads = normalizeDatResults(rawResults);
-    console.log('[AIDA/Core] Step: normalized →', loads.length, 'loads');
     if (loads.length === 0) {
-        console.warn('[AIDA/Core] Step: no loads after normalize. Sample raw keys:', Object.keys(rawResults[0] || {}).join(', '));
+        console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
         return;
     }
     await Storage.clearActive();
     await Storage.setLoads(loads);
     await pushToUI({ loads: await Storage.getLoads() });
-    console.log('[AIDA/Core] Step: handleDatSearchResponse done → pushToUI(loads)');
-
-    // SSE-подписка по searchId из перехваченного ответа
     const sseToken = token || await Storage.getToken('dat');
     if (searchId && sseToken) {
         const lastSearch = (await Storage.getSettings())?.lastSearch;
         startLiveQuery(searchId, sseToken, lastSearch);
     }
+}
+
+async function handleTruckstopSearchResponse(rawResults) {
+    if (!Array.isArray(rawResults) || rawResults.length === 0) return;
+    console.log('[AIDA/Core] Truckstop raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
+    const loads = normalizeTruckstopResults(rawResults);
+    if (loads.length === 0) return;
+    const existing = await Storage.getLoads();
+    const merged = mergeLoadsByBoard(existing, loads, 'truckstop');
+    await Storage.setLoads(merged);
+    await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
+}
+
+async function handleTruckerpathSearchResponse(rawResults) {
+    if (!Array.isArray(rawResults) || rawResults.length === 0) return;
+    console.log('[AIDA/Core] TruckerPath raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
+    let loads;
+    try {
+        loads = normalizeTruckerpathResults(rawResults, {});
+    } catch (e) {
+        console.warn('[AIDA/Core] handleTruckerpathSearchResponse normalize error:', e?.message);
+        return;
+    }
+    if (!loads || loads.length === 0) return;
+    const existing = await Storage.getLoads();
+    const merged = mergeLoadsByBoard(existing, loads, 'tp');
+    await Storage.setLoads(merged);
+    await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
+}
+
+async function handleTruckstopRequestCaptured(msg) {
+    if (!msg || !msg.url) return;
+    if (msg.url.indexOf('LoadSearchCount') !== -1 || msg.url.indexOf('searchCount') !== -1) return;
+    const template = {
+        url: msg.url,
+        method: msg.method || 'POST',
+        headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : {},
+        body: typeof msg.body === 'string' ? msg.body : (msg.body ? JSON.stringify(msg.body) : null),
+        capturedAt: new Date().toISOString()
+    };
+    let cookies = [];
+    try {
+        const tsCookies = await chrome.cookies.getAll({ domain: 'truckstop.com' });
+        const mainCookies = await chrome.cookies.getAll({ domain: 'main.truckstop.com' });
+        const apiCookies = await chrome.cookies.getAll({ domain: 'loadsearch-graphql-api-prod.truckstop.com' });
+        cookies = [...tsCookies, ...mainCookies, ...apiCookies];
+    } catch (_) {}
+    template.cookies = cookies;
+    await Storage.saveSettings({ truckstopRequestTemplate: template });
+}
+
+async function handleTruckerpathRequestCaptured(msg) {
+    if (!msg || !msg.url) return;
+    const template = {
+        url: msg.url,
+        method: msg.method || 'GET',
+        headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : {},
+        body: typeof msg.body === 'string' ? msg.body : (msg.body ? JSON.stringify(msg.body) : null),
+        capturedAt: new Date().toISOString()
+    };
+    let cookies = [];
+    try {
+        const a = await chrome.cookies.getAll({ domain: 'loadboard.truckerpath.com' });
+        const b = await chrome.cookies.getAll({ domain: 'truckerpath.com' });
+        cookies = [...a, ...b];
+    } catch (_) {}
+    template.cookies = cookies;
+    await Storage.saveSettings({ truckerpathRequestTemplate: template });
 }
 
 // ============================================================
@@ -301,7 +381,6 @@ async function fetchDatProfile(token) {
         }
     });
     await pushToUI({ settings: await getSettingsForUI() });
-    console.log('[AIDA/Core] Step: DAT profile loaded → pushToUI(settings)', profile?.account?.companyName);
 }
 
 // ============================================================
@@ -317,61 +396,38 @@ async function searchLoads(params) {
 
     const datToken = await Storage.getToken('dat');
     const tsToken = await Storage.getToken('truckstop');
-    console.log('[AIDA/Core] Step: searchLoads — tokens DAT=' + (datToken ? 'yes' : 'NO') + ', Truckstop=' + (tsToken ? 'yes' : 'NO'));
+    const settings = await Storage.getSettings();
+    const tsTemplate = settings?.truckstopRequestTemplate || null;
+    const tpTemplate = settings?.truckerpathRequestTemplate || null;
+    const existing = await Storage.getLoads();
+    const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
 
-    if (!datToken && !tsToken) {
-        console.warn('[AIDA/Core] Step: searchLoads — no tokens. Open one.dat.com (or truckstop.com), sign in, run a search there so AIDA can capture the token.');
-    }
-
-    console.log('[AIDA/Core] Step: calling adapters (DAT, Truckstop)');
-    const [datResult, tsResult] = await Promise.allSettled([
+    const [datResult, tsResult, tpResult] = await Promise.allSettled([
         DatAdapter.search(params),
-        TruckstopAdapter.search(params)
+        TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate }),
+        TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
-    // DAT adapter теперь возвращает { loads, searchId, token }
     const datRaw = datResult.status === 'fulfilled' ? datResult.value : {};
     const datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
     const datSearchId = datRaw?.searchId || null;
     const datSseToken = datRaw?.token || null;
-    const tsLoads = tsResult.status === 'fulfilled' ? tsResult.value : [];
-    const allLoads = [...(Array.isArray(datLoads) ? datLoads : []), ...(Array.isArray(tsLoads) ? tsLoads : [])];
 
-    console.log('[AIDA/Core] Step: adapters returned DAT=' + datLoads.length + ', Truckstop=' + (Array.isArray(tsLoads) ? tsLoads.length : 0) + ', total=' + allLoads.length);
+    const tsRaw = tsResult.status === 'fulfilled' ? tsResult.value : {};
+    const tsLoads = tsRaw?.loads || (Array.isArray(tsRaw) ? tsRaw : []);
 
-    if (datResult.status === 'rejected') {
-        console.warn('[AIDA/Core] DAT adapter error:', datResult.reason);
-    }
-    if (tsResult.status === 'rejected') {
-        console.warn('[AIDA/Core] Truckstop adapter error:', tsResult.reason);
-    }
-    if (allLoads.length === 0) {
-        console.warn('[AIDA/Core] Step: 0 loads. If no token — open one.dat.com, sign in, run search there once; then try Search here again.');
-    }
+    const tpRaw = tpResult.status === 'fulfilled' ? tpResult.value : {};
+    const tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
 
-    // Дедупликация
-    const seen = new Set();
-    const loads = allLoads.filter(l => {
-        const key = [
-            l.origin?.zip || l.origin?.city,
-            l.destination?.zip || l.destination?.city,
-            l.pickupDate,
-            l.broker?.phone
-        ].join('|');
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
+    const allLoads = [...(Array.isArray(datLoads) ? datLoads : []), ...(Array.isArray(tsLoads) ? tsLoads : []), ...(Array.isArray(tpLoads) ? tpLoads : [])];
+    const loads = deduplicateLoads(allLoads);
 
-    console.log('[AIDA/Core] Step: clearActive + setLoads(' + loads.length + ')');
     await Storage.clearActive();
     await Storage.setLoads(loads);
 
-    const settings = await Storage.getSettings();
     await Storage.saveSettings({ ...settings, lastSearch: params });
 
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });
-    console.log('[AIDA/Core] Step: searchLoads done → pushToUI(loads), total', loads.length);
 
     // SSE-подписка на новые грузы по searchId
     if (datSearchId && datSseToken) {
@@ -678,7 +734,8 @@ async function pushResults(loads, taskId) {
 const BOARD_URL_PREFIXES = [
     'https://one.dat.com/',
     'https://www.truckstop.com/',
-    'https://truckstop.com/'
+    'https://truckstop.com/',
+    'https://loadboard.truckerpath.com/'
 ];
 
 function isBoardTab(url) {
@@ -686,12 +743,28 @@ function isBoardTab(url) {
     return BOARD_URL_PREFIXES.some(prefix => url.startsWith(prefix));
 }
 
+const TRUCKERPATH_LOADBOARD = 'https://loadboard.truckerpath.com/';
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status !== 'complete') return;
     if (!tab?.url || !tab.windowId) return;
     if (!isBoardTab(tab.url)) return;
 
     await openAidaInTab(tab.windowId);
+
+    // Инъекция харвестера TruckerPath в MAIN world после загрузки страницы — иначе перехват не срабатывает.
+    if (tab.url.startsWith(TRUCKERPATH_LOADBOARD)) {
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId },
+                files: ['harvesters/harvester-truckerpath.js'],
+                world: 'MAIN'
+            });
+            console.log('[AIDA/Core] TruckerPath harvester injected into tab', tabId);
+        } catch (e) {
+            console.warn('[AIDA/Core] TruckerPath harvester injection failed:', e?.message);
+        }
+    }
 
     // Не запускаем searchLoads автоматически: грузы уже приходят от харвестера (handleDatSearchResponse).
     // Автопоиск через адаптеры часто возвращал 0 и перезаписывал грузы пустым массивом — они исчезали.

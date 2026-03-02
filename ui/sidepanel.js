@@ -621,6 +621,7 @@ function renderDetailContent(load) {
         ${detailRow('Load', load.fullPartial || '—')}
         ${detailRow('Pickup date', load.pickupDate || '—')}
         ${detailRow('Board', (load.board || '').toUpperCase())}
+        ${detailRow('Comments', (load.comments && load.comments.trim()) ? esc(load.comments.trim()) : '—')}
     </div>
 
     <div class="detail-section">

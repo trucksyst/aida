@@ -409,7 +409,11 @@ fragment RateV4Fields on FreightSearchV4Rate { __typename rateUsd basis }
 
 // ============================================================
 // Normalize — приведение к стандартному формату AIDA
+// Поля сырой карточки: в консоли лог "[AIDA/Core] DAT raw load card" — по нему сверять ключи.
 // ============================================================
+
+/** Ключ описания груза в сырой карточке DAT (GraphQL FindLoadResultV4Fields). Проверить в консоли. */
+const RAW_FIELD_COMMENTS = 'comments';
 
 function normalize(raw) {
     if (!raw || typeof raw !== 'object') return null;
@@ -474,6 +478,7 @@ function normalize(raw) {
             return (s && s[0]) || '';
         })(),
         postedAt: raw.postedAt || item.postedAt || '',
+        comments: typeof raw[RAW_FIELD_COMMENTS] === 'string' ? raw[RAW_FIELD_COMMENTS].trim() : '',
         status: 'active',
         statusUpdatedAt: new Date().toISOString(),
         raw

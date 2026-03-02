@@ -16,8 +16,8 @@
 | **Harvester Truckstop** | `harvesters/harvester-truckstop.js` | ✓ Перехват токена на truckstop.com |
 | **Harvester Bridge** | `harvesters/harvester-bridge.js` | ✓ Relay postMessage → chrome.runtime.sendMessage (MAIN → Isolated → Background) |
 | **Adapter DAT** | `background/adapters/dat-adapter.js` | ✓ GraphQL FindLoads + GetLocationSuggestions, нормализация, rate limit, worklist API, SSE subscribeLiveQuery |
-| **Adapter Truckstop** | `background/adapters/truckstop-adapter.js` | ◐ Заглушка (return []) — реализация в следующей версии |
-| **Adapter TruckerPath** | `background/adapters/truckerpath-adapter.js` | ◐ Заглушка (return []) |
+| **Adapter Truckstop** | `background/adapters/truckstop-adapter.js` | ✓ Шаблон (TS_SEARCH_REQUEST_CAPTURED) + fetch из background, геокод Nominatim, нормализация, comments из RAW_FIELD_COMMENTS |
+| **Adapter TruckerPath** | `background/adapters/truckerpath-adapter.js` | ✓ Только данные с вкладки (харвестер), маппинг pickup_locations/drop_offs, pickup.address, trip_details, comments из RAW_FIELD_COMMENTS |
 | **Retell** | `background/retell.js` | ✓ initiateCall, generateEmail (нет телефона → mailto) |
 | **UI** | `ui/sidepanel.html`, `ui/sidepanel.js`, `ui/components/styles.css` | ✓ Полноэкранная вкладка: поиск, таблица грузов, панель деталей, закладки, история, настройки, агент OpenClaw, статус-бар (борды, счётчик, таймер, +N new), тема |
 
@@ -28,7 +28,7 @@
 | Харвестер токенов (DAT) | ✓ |
 | Харвестер токенов (Truckstop) | ✓ |
 | Адаптер DAT (GraphQL) | ✓ FindLoads + GetLocationSuggestions |
-| Адаптер Truckstop (REST) | ◐ Заглушка — нет REST API |
+| Адаптер Truckstop (REST) | ✓ Шаблон + GraphQL из background |
 | Поиск грузов (UI + Core) | ✓ + перехват ответа со страницы DAT |
 | Storage (токены, work:, settings:) | ✓ + lastSearch |
 | Очистка при смене направления (clearActive) | ✓ |
@@ -48,6 +48,8 @@
 - **Keep-alive** — chrome.alarms для предотвращения засыпания Service Worker при активном SSE.
 - **Живой таймер** в статус-баре — "just now" / "Xs ago" / "Xm ago" с обновлением каждые 10 сек.
 - **Индикатор +N new** — в статус-баре рядом со счётчиком грузов, кликабельный (refresh).
+- **Storage:** токены и шаблоны запросов (с куки) сохраняются в chrome.storage.local до следующего перехвата на вкладке борда или до переустановки расширения.
+- **Карточка груза (ТЗ):** поле `comments` (описание груза) в едином формате; ключ в сырой карточке задаётся константой RAW_FIELD_COMMENTS (смотреть лог "[AIDA/Core] … raw load card" в консоли). В UI строка Comments всегда в блоке Shipment.
 
 ---
 
