@@ -30,6 +30,8 @@ import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truc
 // ============================================================
 
 const AIDA_UI_URL = chrome.runtime.getURL('ui/sidepanel.html');
+const BUILD = chrome.runtime.getManifest().version;
+console.log(`[AIDA/Core] Service Worker started — build ${BUILD}`);
 
 /** Дедупликация по origin+destination+pickupDate+broker.phone. */
 function deduplicateLoads(loads) {
@@ -346,8 +348,6 @@ async function handleTruckstopSearchResponse(rawResults) {
     await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
 }
 
-let _tpPushTimer = null;
-
 async function handleTruckerpathSearchResponse(rawResults) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log('[AIDA/Core] TruckerPath raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
@@ -359,26 +359,10 @@ async function handleTruckerpathSearchResponse(rawResults) {
         return;
     }
     if (!loads || loads.length === 0) return;
-
     const existing = await Storage.getLoads();
-    const existingTp = existing.filter(l => l.board === 'tp');
-    const otherBoards = existing.filter(l => l.board !== 'tp');
-
-    // Накапливаем: добавляем новые TP-грузы к уже существующим с дедупликацией.
-    // Новые грузы в начале — так deduplicate сохранит свежие версии.
-    const mergedTp = deduplicateLoads([...loads, ...existingTp]);
-    const allLoads = deduplicateLoads([...otherBoards, ...mergedTp]);
-    console.log('[AIDA/Core] TruckerPath merge: existing TP', existingTp.length, '+ new', loads.length, '→ merged TP', mergedTp.length);
-
-    await Storage.setLoads(allLoads);
-
-    // Дебаунс: при серии быстрых перехватов (страница TP делает несколько API-вызовов)
-    // обновляем UI один раз через 500ms, а не на каждый ответ.
-    if (_tpPushTimer) clearTimeout(_tpPushTimer);
-    _tpPushTimer = setTimeout(async () => {
-        _tpPushTimer = null;
-        await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
-    }, 500);
+    const merged = mergeLoadsByBoard(existing, loads, 'tp');
+    await Storage.setLoads(merged);
+    await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
 }
 
 async function handleTruckstopRequestCaptured(msg) {

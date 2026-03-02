@@ -11,7 +11,8 @@
         console.log('[AIDA/Harvester] TruckerPath harvester already loaded, re-patching fetch/XHR');
     }
     window.__aidaHarvesterTruckerpath = true;
-    console.log('[AIDA/Harvester] TruckerPath harvester loaded');
+    var _build = '0.1.1';
+    console.log('[AIDA/Harvester] TruckerPath harvester loaded — build ' + _build);
 
     function sendToBridge(payload) {
         try {
@@ -131,8 +132,9 @@
             if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) return false;
             var rows = findLoadsArray(data);
             if (Array.isArray(rows) && rows.length > 0) {
-                console.log('[AIDA/Harvester] TruckerPath parsed', rows.length, 'loads');
-                console.log('[AIDA/Harvester] TruckerPath sample load card (raw, for parser):', rows[0]);
+                console.log('[AIDA/Harvester] TP INTERCEPT:', rows.length, 'loads from URL:', url);
+                console.log('[AIDA/Harvester] TP card keys:', Object.keys(rows[0]).join(', '));
+                console.log('[AIDA/Harvester] TP sample card:', rows[0]);
                 sendToBridge({ type: 'TP_SEARCH_RESPONSE', results: rows });
                 return true;
             }
