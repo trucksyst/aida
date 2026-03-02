@@ -32,7 +32,10 @@ function sendToCore(type, payload = {}) {
     return new Promise((resolve) => {
         chrome.runtime.sendMessage({ type, ...payload }, (response) => {
             if (chrome.runtime.lastError) {
-                console.warn('[AIDA/UI] Message error:', chrome.runtime.lastError.message);
+                const msg = chrome.runtime.lastError.message || '';
+                if (msg.indexOf('Extension context invalidated') === -1) {
+                    console.warn('[AIDA/UI] Message error:', msg);
+                }
                 resolve(null);
             } else {
                 resolve(response);
