@@ -29,7 +29,7 @@ import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truc
 // Открытие UI в полноэкранной вкладке (не Side Panel)
 // ============================================================
 
-const AIDA_UI_URL = chrome.runtime.getURL('ui/sidepanel.html');
+const AIDA_UI_URL = chrome.runtime.getURL('ui/app.html');
 const BUILD = chrome.runtime.getManifest().version;
 console.log(`[AIDA/Core] Service Worker started — build ${BUILD}`);
 
@@ -171,7 +171,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             break;
 
         case 'TP_SEARCH_RESPONSE':
-            handleTruckerpathSearchResponse(message.results).catch(console.error);
+            handleTruckerpathSearchResponse(message.results, message.sourceUrl).catch(console.error);
             sendResponse({ ok: true });
             break;
 
@@ -348,9 +348,10 @@ async function handleTruckstopSearchResponse(rawResults) {
     await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
 }
 
-async function handleTruckerpathSearchResponse(rawResults) {
+async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
-    console.log('[AIDA/Core] TruckerPath raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
+    console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} raw cards`);
+    console.log('[AIDA/Core] TP card[0]:', rawResults[0]);
     let loads;
     try {
         loads = normalizeTruckerpathResults(rawResults, {});
@@ -359,6 +360,7 @@ async function handleTruckerpathSearchResponse(rawResults) {
         return;
     }
     if (!loads || loads.length === 0) return;
+    console.log(`[AIDA/Core] TP normalized: ${loads.length} loads, origin: ${loads[0]?.origin?.city}, ${loads[0]?.origin?.state} → ${loads[0]?.destination?.city}, ${loads[0]?.destination?.state}`);
     const existing = await Storage.getLoads();
     const merged = mergeLoadsByBoard(existing, loads, 'tp');
     await Storage.setLoads(merged);

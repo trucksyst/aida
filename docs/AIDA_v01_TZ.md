@@ -289,8 +289,8 @@ aida/
 │   ├── harvester-truckstop.js
 │   └── harvester-truckerpath.js
 └── ui/
-    ├── sidepanel.html
-    ├── sidepanel.js
+    ├── app.html
+    ├── app.js
     └── components/
 ```
 
