@@ -379,7 +379,8 @@ html, body {
     letter-spacing: 0.5px;
 }
 .board-badge.dat  { background: #1a3a5c; color: #58a6ff; }
-.board-badge.ts   { background: #1a3c1a; color: #2ea043; }
+.board-badge.ts,
+.board-badge.truckstop { background: #1a3c1a; color: #2ea043; }
 .board-badge.tp   { background: #3c1a1a; color: #f85149; }
 
 .status-badge {
@@ -395,12 +396,15 @@ html, body {
 .status-badge.saved         { background: #1a3c1a; color: var(--success); }
 .status-badge.calling       { background: #3c2a1a; color: var(--warning); }
 .status-badge.called_pending{ background: #2c2c1a; color: var(--warning); }
+.status-badge.emailed       { background: #2a2a3c; color: #8b949e; }
+.status-badge.replied        { background: #1a3c1a; color: var(--success); }
 .status-badge.booked        { background: #1a3c1a; color: var(--success); }
 .status-badge.no_response   { background: #3c1a1a; color: var(--danger); }
 
 /* Светлая тема: реверс — буквы синие/цветные, плоскость белая */
 [data-theme="light"] .board-badge.dat  { background: #fff; color: #0969da; border: 1px solid #0969da; }
-[data-theme="light"] .board-badge.ts   { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
+[data-theme="light"] .board-badge.ts,
+[data-theme="light"] .board-badge.truckstop { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }
 [data-theme="light"] .board-badge.tp   { background: #fff; color: #cf222e; border: 1px solid #cf222e; }
 [data-theme="light"] .status-badge.active        { background: #fff; color: #0969da; border: 1px solid #0969da; }
 [data-theme="light"] .status-badge.saved         { background: #fff; color: #1a7f37; border: 1px solid #1a7f37; }

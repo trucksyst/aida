@@ -304,10 +304,10 @@ function bindEvents() {
 
     // State input — Enter
     ['origin-city', 'origin-state', 'dest-city', 'dest-state', 'search-radius',
-     'date-from', 'date-to'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-    });
+        'date-from', 'date-to'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+        });
 
     // Table sort
     document.querySelectorAll('#load-table thead th[data-sort]').forEach(th => {
@@ -401,13 +401,18 @@ async function doSearch() {
         console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
         const resp = await sendToCore('SEARCH_LOADS', { params });
         console.log('[AIDA/UI] Step: SEARCH_LOADS response', resp?.error ? 'error: ' + resp.error : 'loads: ' + (Array.isArray(resp) ? resp.length : (resp?.loads?.length ?? 0)));
-        if (resp?.error) {
-            showToast('Search error: ' + resp.error, 'error');
+        const result = resp?.loads !== undefined ? resp : (Array.isArray(resp) ? { loads: resp } : resp);
+        if (result?.error) {
+            showToast('Search error: ' + result.error, 'error');
         } else {
-            const loads = Array.isArray(resp) ? resp : [];
+            const loads = Array.isArray(result?.loads) ? result.loads : (Array.isArray(resp) ? resp : []);
             state.loads = loads;
             renderTable();
             updateStatusBar();
+            // Показываем warnings от адаптеров
+            if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+                showToast('Board issues: ' + result.warnings.join('; '), 'error');
+            }
             if (loads.length > 0) {
                 showToast(`Found ${loads.length} loads`);
             } else {
@@ -497,18 +502,18 @@ function getSortedLoads() {
         let va, vb;
 
         switch (col) {
-            case 'rate':        va = a.rate || 0; vb = b.rate || 0; break;
-            case 'rpm':         va = a.rpm || 0; vb = b.rpm || 0; break;
-            case 'miles':       va = a.miles || 0; vb = b.miles || 0; break;
-            case 'weight':      va = a.weight || 0; vb = b.weight || 0; break;
-            case 'equipment':   va = a.equipment || ''; vb = b.equipment || ''; break;
-            case 'origin':      va = a.origin?.city || ''; vb = b.origin?.city || ''; break;
+            case 'rate': va = a.rate || 0; vb = b.rate || 0; break;
+            case 'rpm': va = a.rpm || 0; vb = b.rpm || 0; break;
+            case 'miles': va = a.miles || 0; vb = b.miles || 0; break;
+            case 'weight': va = a.weight || 0; vb = b.weight || 0; break;
+            case 'equipment': va = a.equipment || ''; vb = b.equipment || ''; break;
+            case 'origin': va = a.origin?.city || ''; vb = b.origin?.city || ''; break;
             case 'destination': va = a.destination?.city || ''; vb = b.destination?.city || ''; break;
-            case 'broker':      va = a.broker?.name || ''; vb = b.broker?.name || ''; break;
-            case 'board':       va = a.board || ''; vb = b.board || ''; break;
-            case 'pickupDate':  va = a.pickupDate || ''; vb = b.pickupDate || ''; break;
-            case 'status':      va = a.status || ''; vb = b.status || ''; break;
-            default:            va = 0; vb = 0;
+            case 'broker': va = a.broker?.name || ''; vb = b.broker?.name || ''; break;
+            case 'board': va = a.board || ''; vb = b.board || ''; break;
+            case 'pickupDate': va = a.pickupDate || ''; vb = b.pickupDate || ''; break;
+            case 'status': va = a.status || ''; vb = b.status || ''; break;
+            default: va = 0; vb = 0;
         }
 
         if (typeof va === 'string') {
@@ -528,7 +533,7 @@ function renderRow(load) {
     const broker = esc(load.broker?.name || '—');
     const dateStr = load.pickupDate ? load.pickupDate.slice(5) : '—'; // MM-DD
     const status = renderStatusBadge(load.status);
-    const board = `<span class="board-badge ${load.board}">${load.board.toUpperCase()}</span>`;
+    const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
 
     return `
     <tr data-id="${esc(load.id)}" class="status-${load.status || 'active'}">
@@ -631,8 +636,8 @@ function renderDetailContent(load) {
         <h3>Broker</h3>
         ${detailRow('Company', load.broker?.name || '—')}
         ${detailRow('Phone', load.broker?.phone
-            ? `<a href="tel:${load.broker.phone}" style="color:var(--accent)">${load.broker.phone}</a>`
-            : '—')}
+        ? `<a href="tel:${load.broker.phone}" style="color:var(--accent)">${load.broker.phone}</a>`
+        : '—')}
         ${detailRow('Email', load.broker?.email
             ? `<a href="mailto:${load.broker.email}" style="color:var(--accent)">${load.broker.email}</a>`
             : '—')}
@@ -815,10 +820,7 @@ async function saveSettings() {
         retellAgentId: getVal('set-retell-agent')
     };
 
-    const settings = await sendToCore('GET_SETTINGS');
-    const current = settings?.settings || {};
-
-    await sendToCore('SAVE_SETTINGS', { data: { ...current, user } });
+    await sendToCore('SAVE_SETTINGS', { data: { user } });
     showToast('Settings saved');
 }
 
@@ -830,10 +832,7 @@ async function saveOpenClaw() {
         enabled: document.getElementById('agent-toggle').checked
     };
 
-    const settings = await sendToCore('GET_SETTINGS');
-    const current = settings?.settings || {};
-
-    await sendToCore('SAVE_SETTINGS', { data: { ...current, openclaw } });
+    await sendToCore('SAVE_SETTINGS', { data: { openclaw } });
     showToast('OpenClaw settings saved');
 }
 
@@ -882,9 +881,11 @@ function updateAgentStatus() {
 function updateBoardDots() {
     const dotDat = document.getElementById('dot-dat');
     const dotTs = document.getElementById('dot-ts');
+    const dotTp = document.getElementById('dot-tp');
 
-    if (dotDat) dotDat.classList.toggle('online', state.boardStatus.dat);
-    if (dotTs) dotTs.classList.toggle('online', state.boardStatus.truckstop);
+    if (dotDat) dotDat.classList.toggle('online', !!state.boardStatus.dat);
+    if (dotTs) dotTs.classList.toggle('online', !!state.boardStatus.truckstop);
+    if (dotTp) dotTp.classList.toggle('online', !!state.boardStatus.tp);
 }
 
 // ============================================================

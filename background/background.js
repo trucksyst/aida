@@ -73,7 +73,6 @@ async function pushToUI(payload) {
         for (const tab of tabs) {
             chrome.tabs.sendMessage(tab.id, { type: 'DATA_UPDATED', payload }).catch(() => {});
         }
-        const keys = Object.keys(payload).filter(k => payload[k] !== undefined);
     } catch (e) {
         console.warn('[AIDA/Core] pushToUI failed:', e.message);
     }
@@ -182,7 +181,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case 'REMOVE_BOOKMARK':
-            removeBookmark(message.loadId).then(() => sendResponse({ ok: true }));
+            removeBookmark(message.loadId)
+                .then(() => sendResponse({ ok: true }))
+                .catch(err => sendResponse({ error: err.message }));
             return true;
 
         case 'CALL_BROKER':
@@ -209,7 +210,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'TOGGLE_AGENT':
             toggleAgentMode(message.enabled);
             sendResponse({ ok: true });
-            break;
+            return true;
 
         case 'GET_LOADS':
             Storage.getLoads().then(loads => {
@@ -279,8 +280,10 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
         console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
         return;
     }
-    await Storage.clearActive();
-    await Storage.setLoads(loads);
+    // Мерж: заменяем только DAT-грузы, сохраняя TS/TP
+    const existing = await Storage.getLoads();
+    const merged = mergeLoadsByBoard(existing, loads, 'dat');
+    await Storage.setLoads(merged);
     await pushToUI({ loads: await Storage.getLoads() });
     const sseToken = token || await Storage.getToken('dat');
     if (searchId && sseToken) {
@@ -408,15 +411,38 @@ async function searchLoads(params) {
         TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
+    // Логируем ошибки адаптеров (не проглатываем молча)
+    const adapterWarnings = [];
     const datRaw = datResult.status === 'fulfilled' ? datResult.value : {};
+    if (datResult.status === 'rejected') {
+        console.warn('[AIDA/Core] DAT adapter error:', datResult.reason?.message);
+        adapterWarnings.push('DAT: ' + (datResult.reason?.message || 'error'));
+    } else if (datRaw?.error) {
+        console.warn('[AIDA/Core] DAT adapter returned error:', datRaw.error);
+        adapterWarnings.push('DAT: ' + (datRaw.error.message || datRaw.error));
+    }
     const datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
     const datSearchId = datRaw?.searchId || null;
     const datSseToken = datRaw?.token || null;
 
     const tsRaw = tsResult.status === 'fulfilled' ? tsResult.value : {};
+    if (tsResult.status === 'rejected') {
+        console.warn('[AIDA/Core] Truckstop adapter error:', tsResult.reason?.message);
+        adapterWarnings.push('Truckstop: ' + (tsResult.reason?.message || 'error'));
+    } else if (tsRaw?.error) {
+        console.warn('[AIDA/Core] Truckstop adapter returned error:', tsRaw.error);
+        adapterWarnings.push('Truckstop: ' + (tsRaw.error.message || tsRaw.error));
+    }
     const tsLoads = tsRaw?.loads || (Array.isArray(tsRaw) ? tsRaw : []);
 
     const tpRaw = tpResult.status === 'fulfilled' ? tpResult.value : {};
+    if (tpResult.status === 'rejected') {
+        console.warn('[AIDA/Core] TruckerPath adapter error:', tpResult.reason?.message);
+        adapterWarnings.push('TruckerPath: ' + (tpResult.reason?.message || 'error'));
+    } else if (tpRaw?.error) {
+        console.warn('[AIDA/Core] TruckerPath adapter returned error:', tpRaw.error);
+        adapterWarnings.push('TruckerPath: ' + (tpRaw.error.message || tpRaw.error));
+    }
     const tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
 
     const allLoads = [...(Array.isArray(datLoads) ? datLoads : []), ...(Array.isArray(tsLoads) ? tsLoads : []), ...(Array.isArray(tpLoads) ? tpLoads : [])];
@@ -434,7 +460,8 @@ async function searchLoads(params) {
         startLiveQuery(datSearchId, datSseToken, params);
     }
 
-    return loads;
+    // Возвращаем loads и warnings для UI
+    return { loads, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
 }
 
 // ============================================================
@@ -451,6 +478,8 @@ const LIVE_QUERY_PUSH_DELAY = 3_000; // 3 сек — копим пачку пе�
 
 function startLiveQuery(searchId, token, searchParams) {
     stopLiveQuery();
+    // Активируем keep-alive только при активном SSE
+    chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
     _liveQueryNewCount = 0;
     _liveQueryParams = searchParams;
 
@@ -509,6 +538,8 @@ function stopLiveQuery() {
     }
     _liveQueryNewCount = 0;
     _liveQueryParams = null;
+    // Отключаем keep-alive когда SSE не активен
+    chrome.alarms.clear('aida-keepalive').catch(() => {});
 }
 
 // ============================================================
@@ -776,8 +807,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // ============================================================
 
 chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
-// Keep-alive для SSE: SW пробуждается каждые 25 сек, пока SSE активен
-chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
+// Keep-alive для SSE создаётся динамически в startLiveQuery() / stopLiveQuery()
 
 chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-cleanup') {

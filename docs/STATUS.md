@@ -107,6 +107,30 @@ SSE-клиент реализован на `fetch` + `ReadableStream` + `TextDec
 
 ---
 
+## Аудит и исправления — 2026-03-02
+
+Git checkpoint: `fb9bdd2` («checkpoint: before bugfix audit 2026-03-02»)
+
+### Найденные ошибки и план исправлений
+
+| # | Проблема | Файл | Приоритет | Статус |
+|---|----------|------|-----------|--------|
+| 1 | `handleDatSearchResponse` — `clearActive()` стирает грузы TS/TP, нужен `mergeLoadsByBoard` | background.js | 🔴 Высокий | ✅ Исправлено |
+| 2 | Truckstop бейдж: CSS класс `.ts` ≠ board value `truckstop` — бейджи без стилей | styles.css | 🔴 Высокий | ✅ Исправлено |
+| 3 | `pruneHistory()` — race condition: два цикла getLoads/setLoads, данные могут затереться | storage.js | 🟡 Средний | ✅ Исправлено |
+| 4 | Ошибки адаптеров TS/TP проглатываются, не доходят до UI | background.js | 🟡 Средний | ✅ Исправлено |
+| 5 | Race condition при save settings (read-modify-write без блокировки) | sidepanel.js | 🟡 Средний | ✅ Исправлено |
+| 6 | `REMOVE_BOOKMARK` — нет `.catch()`, UI может зависнуть | background.js | 🟡 Средний | ✅ Исправлено |
+| 7 | `TOGGLE_AGENT` — нет `return true` для async-цепочки | background.js | 🟡 Средний | ✅ Исправлено |
+| 8 | `pushToUI()` — неиспользуемая переменная `keys` (мёртвый код) | background.js | 🟢 Низкий | ✅ Исправлено |
+| 9 | Нет стилей `emailed`/`replied` в тёмной теме | styles.css | 🟢 Низкий | ✅ Исправлено |
+| 10 | TruckerPath нет в статус-баре | sidepanel.html + sidepanel.js | 🟢 Низкий | ✅ Исправлено |
+| 11 | Keep-alive alarm работает постоянно, даже без SSE | background.js | 🟢 Низкий | ✅ Исправлено |
+| 12 | `board.toUpperCase()` без null-check → падение с undefined | sidepanel.js | 🟢 Низкий | ✅ Исправлено |
+| 13 | Equipment select ограничен 3 типами, DAT поддерживает 9 | sidepanel.html | 🟢 Низкий | ✅ Исправлено |
+
+---
+
 ## Нужно доработать
 
 | Задача | Приоритет | Заметки |
@@ -136,21 +160,22 @@ aida/
 ├── package.json
 ├── .gitignore
 ├── background/
-│   ├── background.js          ← Core (Service Worker, ~740 строк)
-│   ├── storage.js             ← Storage API (~200 строк)
-│   ├── retell.js              ← Retell API (~150 строк)
+│   ├── background.js          ← Core (Service Worker)
+│   ├── storage.js             ← Storage API
+│   ├── retell.js              ← Retell API
 │   └── adapters/
-│       ├── dat-adapter.js     ← DAT GraphQL + SSE (~770 строк)
-│       ├── truckstop-adapter.js  ← заглушка
-│       └── truckerpath-adapter.js ← заглушка
+│       ├── dat-adapter.js     ← DAT GraphQL + SSE
+│       ├── truckstop-adapter.js
+│       └── truckerpath-adapter.js
 ├── harvesters/
 │   ├── harvester-bridge.js    ← Relay MAIN→Isolated→Background
 │   ├── harvester-dat.js       ← Token + Search intercept (one.dat.com)
-│   └── harvester-truckstop.js ← Token intercept (truckstop.com)
+│   ├── harvester-truckstop.js ← Token + Search intercept (truckstop.com)
+│   └── harvester-truckerpath.js ← Token + Search intercept (truckerpath.com)
 ├── ui/
-│   ├── sidepanel.html         ← Layout (~250 строк)
-│   ├── sidepanel.js           ← UI controller (~990 строк)
-│   ├── components/styles.css  ← Стили (~600 строк)
+│   ├── sidepanel.html         ← Layout
+│   ├── sidepanel.js           ← UI controller
+│   ├── components/styles.css  ← Стили
 │   └── data/locations.js      ← Автоподстановка городов
 ├── scripts/
 │   └── open-dat.js            ← Playwright тест
@@ -163,4 +188,4 @@ aida/
 
 ---
 
-*Обновлено: 2026-02-28*
+*Обновлено: 2026-03-02*

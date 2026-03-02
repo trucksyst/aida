@@ -179,16 +179,25 @@ const Storage = {
   async pruneHistory() {
     const now = Date.now();
     const MS_60_DAYS = 60 * 24 * 60 * 60 * 1000;
+    const MS_24H = 24 * 60 * 60 * 1000;
 
-    // Очищаем loads: no_response удаляем, booked > 60 дней удаляем
+    // Одна атомарная операция: getLoads → фильтрация + обновление статусов → setLoads
     const loads = await this.getLoads();
-    const cleanLoads = loads.filter(l => {
-      if (l.status === 'no_response') return false;
-      if (l.status === 'booked' && l.bookedAt) {
-        return (now - new Date(l.bookedAt).getTime()) < MS_60_DAYS;
-      }
-      return true;
-    });
+    const cleanLoads = loads
+      .filter(l => {
+        if (l.status === 'no_response') return false;
+        if (l.status === 'booked' && l.bookedAt) {
+          return (now - new Date(l.bookedAt).getTime()) < MS_60_DAYS;
+        }
+        return true;
+      })
+      .map(l => {
+        // emailed / called_pending → no_response если прошло 24 часа
+        if (!['emailed', 'called_pending'].includes(l.status)) return l;
+        const age = now - new Date(l.statusUpdatedAt || l.postedAt).getTime();
+        if (age > MS_24H) return { ...l, status: 'no_response' };
+        return l;
+      });
     await this.setLoads(cleanLoads);
 
     // Очищаем закладки: no_response удаляем
@@ -196,24 +205,13 @@ const Storage = {
     const cleanBookmarks = bookmarks.filter(b => b.status !== 'no_response');
     await chrome.storage.local.set({ 'saved:bookmarks': cleanBookmarks });
 
-    // История звонков: booked > 60 дней удаляем
+    // История звонков: > 60 дней удаляем
     const data = await chrome.storage.local.get('history:calls');
     const history = (data['history:calls'] || []).filter(h => {
       if (!h.callTime) return false;
       return (now - new Date(h.callTime).getTime()) < MS_60_DAYS;
     });
     await chrome.storage.local.set({ 'history:calls': history });
-
-    // emailed / called_pending → no_response если прошло 24 часа
-    const MS_24H = 24 * 60 * 60 * 1000;
-    const allLoads = await this.getLoads();
-    const updatedLoads = allLoads.map(l => {
-      if (!['emailed', 'called_pending'].includes(l.status)) return l;
-      const age = now - new Date(l.statusUpdatedAt || l.postedAt).getTime();
-      if (age > MS_24H) return { ...l, status: 'no_response' };
-      return l;
-    });
-    await this.setLoads(updatedLoads);
   }
 };
 
