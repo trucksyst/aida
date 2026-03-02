@@ -11,7 +11,7 @@
         console.log('[AIDA/Harvester] TruckerPath harvester already loaded, re-patching fetch/XHR');
     }
     window.__aidaHarvesterTruckerpath = true;
-    var _build = '0.1.2';
+    var _build = '0.1.3';
     console.log('[AIDA/Harvester] TruckerPath harvester loaded — build ' + _build);
 
     function sendToBridge(payload) {
@@ -22,13 +22,35 @@
         }
     }
 
-    /** Перехватываем loadboard и api TruckerPath, в т.ч. api.truckerpath.com/v1/loads/load-search */
-    function isSearchUrl(url) {
+    /** Основной endpoint поиска TP — /tl/search/filter/web/v2 */
+    var PRIMARY_SEARCH_PATH = '/tl/search/filter/';
+
+    /** URL исключений — рекомендации, не поиск */
+    var EXCLUDED_PATHS = ['truckloads-similar', '/exposure/', '/similar/'];
+
+    /** Проверка: это основной поисковый endpoint? */
+    function isPrimarySearchUrl(url) {
+        if (!url) return false;
+        var u = String(url).toLowerCase();
+        return u.indexOf('api.truckerpath.com') !== -1 && u.indexOf(PRIMARY_SEARCH_PATH) !== -1;
+    }
+
+    /** Проверка: это fallback поисковый URL (шире, но без рекомендаций)? */
+    function isFallbackSearchUrl(url) {
         if (!url) return false;
         var u = String(url).toLowerCase();
         var isTpDomain = u.indexOf('loadboard.truckerpath.com') !== -1 || u.indexOf('api.truckerpath.com') !== -1;
         if (!isTpDomain) return false;
-        return u.indexOf('load') !== -1 || u.indexOf('search') !== -1 || u.indexOf('carrier') !== -1 || u.indexOf('graphql') !== -1 || u.indexOf('load-search') !== -1;
+        // Исключаем рекомендации
+        for (var i = 0; i < EXCLUDED_PATHS.length; i++) {
+            if (u.indexOf(EXCLUDED_PATHS[i]) !== -1) return false;
+        }
+        return u.indexOf('/search') !== -1 || u.indexOf('/loads') !== -1 || u.indexOf('graphql') !== -1;
+    }
+
+    /** Любой TP поисковый URL (primary или fallback) */
+    function isSearchUrl(url) {
+        return isPrimarySearchUrl(url) || isFallbackSearchUrl(url);
     }
 
     function isLikelyLoadObject(obj) {
@@ -108,7 +130,8 @@
     }
 
     function captureRequest(url, method, headers, body) {
-        if (!isSearchUrl(url)) return;
+        // Захватываем template только от основного поискового endpoint
+        if (!isPrimarySearchUrl(url)) return;
         sendToBridge({
             type: 'TP_SEARCH_REQUEST_CAPTURED',
             url: url,
@@ -117,6 +140,9 @@
             body: typeof body === 'string' ? body : (body ? JSON.stringify(body) : null)
         });
     }
+
+    /** _primaryCaptured — был ли уже перехват с основного endpoint в этой сессии */
+    var _primaryCaptured = false;
 
     function captureJsonResponse(rawText, url) {
         try {
@@ -127,15 +153,26 @@
                 }
                 return false;
             }
+
+            var isPrimary = isPrimarySearchUrl(url);
+            var isFallback = !isPrimary && isFallbackSearchUrl(url);
+
+            // Если primary уже перехвачен — fallback не нужен
+            if (isFallback && _primaryCaptured) {
+                return false;
+            }
+
             var data = JSON.parse(text);
             if (!data || typeof data !== 'object') return false;
             if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) return false;
             var rows = findLoadsArray(data);
             if (Array.isArray(rows) && rows.length > 0) {
-                console.log('[AIDA/Harvester] TP INTERCEPT:', rows.length, 'loads from URL:', url);
+                var source = isPrimary ? 'PRIMARY' : 'FALLBACK';
+                console.log('[AIDA/Harvester] TP INTERCEPT [' + source + ']:', rows.length, 'loads from URL:', url);
                 console.log('[AIDA/Harvester] TP card keys:', Object.keys(rows[0]).join(', '));
                 console.log('[AIDA/Harvester] TP sample card:', rows[0]);
                 sendToBridge({ type: 'TP_SEARCH_RESPONSE', results: rows, sourceUrl: url });
+                if (isPrimary) _primaryCaptured = true;
                 return true;
             }
         } catch (e) {
