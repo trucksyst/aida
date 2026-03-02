@@ -11,7 +11,7 @@
         console.log('[AIDA/Harvester] TruckerPath harvester already loaded, re-patching fetch/XHR');
     }
     window.__aidaHarvesterTruckerpath = true;
-    var _build = '0.1.5';
+    var _build = '0.1.6';
     console.log('[AIDA/Harvester] TruckerPath harvester loaded — build ' + _build);
 
     function sendToBridge(payload) {
@@ -50,18 +50,7 @@
 
     /** Любой TP поисковый URL (primary или fallback) */
     function isSearchUrl(url) {
-        var result = isPrimarySearchUrl(url) || isFallbackSearchUrl(url);
-        // DEBUG: показать TP URL которые отклоняются
-        if (!result && url) {
-            var u = String(url).toLowerCase();
-            if (u.indexOf('truckerpath') !== -1 && u.indexOf('.js') === -1 && u.indexOf('.css') === -1 && u.indexOf('.png') === -1 && u.indexOf('.svg') === -1) {
-                console.log('[AIDA/Harvester] TP URL SKIPPED:', url.substring(0, 120));
-            }
-        }
-        if (result) {
-            console.log('[AIDA/Harvester] TP URL MATCHED:', url.substring(0, 120));
-        }
-        return result;
+        return isPrimarySearchUrl(url) || isFallbackSearchUrl(url);
     }
 
     function isLikelyLoadObject(obj) {
