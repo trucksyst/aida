@@ -21,13 +21,25 @@
         }
     }
 
-    /** Перехватываем loadboard и api TruckerPath, в т.ч. api.truckerpath.com/v1/loads/load-search */
+    /**
+     * Проверяем URL на конкретные API-пути поиска TruckerPath.
+     * НЕ используем 'load' — оно содержится в самом домене loadboard.truckerpath.com!
+     * Конкретные пути: load-search, load_search, graphql, /search, /api/v1/loads.
+     */
     function isSearchUrl(url) {
         if (!url) return false;
         var u = String(url).toLowerCase();
+        // Должен быть домен TruckerPath
         var isTpDomain = u.indexOf('loadboard.truckerpath.com') !== -1 || u.indexOf('api.truckerpath.com') !== -1;
         if (!isTpDomain) return false;
-        return u.indexOf('load') !== -1 || u.indexOf('search') !== -1 || u.indexOf('carrier') !== -1 || u.indexOf('graphql') !== -1 || u.indexOf('load-search') !== -1;
+        // Конкретные API-пути (не просто 'load' — это есть в самом домене)
+        return (
+            u.indexOf('load-search') !== -1 ||
+            u.indexOf('load_search') !== -1 ||
+            u.indexOf('/search') !== -1 ||
+            u.indexOf('graphql') !== -1 ||
+            u.indexOf('/api/') !== -1 && (u.indexOf('/loads') !== -1 || u.indexOf('/search') !== -1)
+        );
     }
 
     function isLikelyLoadObject(obj) {
@@ -131,7 +143,7 @@
             if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) return false;
             var rows = findLoadsArray(data);
             if (Array.isArray(rows) && rows.length > 0) {
-                console.log('[AIDA/Harvester] TruckerPath parsed', rows.length, 'loads');
+                console.log('[AIDA/Harvester] TruckerPath parsed', rows.length, 'loads from:', url);
                 console.log('[AIDA/Harvester] TruckerPath sample load card (raw, for parser):', rows[0]);
                 sendToBridge({ type: 'TP_SEARCH_RESPONSE', results: rows });
                 return true;
@@ -161,7 +173,7 @@
                 } else if (hs && typeof hs === 'object') headersObj = hs;
             }
             captureRequest(url, method, headersObj, opts && opts.body);
-        } catch (_) {}
+        } catch (_) { }
         var response = await origFetch.apply(this, args);
         if (response && typeof response.ok === 'boolean' && response.ok && isSearchUrl(url)) {
             try {
@@ -194,7 +206,7 @@
         var shouldWatch = isSearchUrl(url);
         try {
             captureRequest(url, xhr._aidaMethod || 'GET', (xhr._aidaHeaders && typeof xhr._aidaHeaders === 'object') ? xhr._aidaHeaders : {}, arguments[0]);
-        } catch (_) {}
+        } catch (_) { }
         function onLoad() {
             if (!shouldWatch || xhr.readyState !== 4) return;
             var status = typeof xhr.status === 'number' ? xhr.status : 0;

@@ -238,17 +238,8 @@ const TruckerpathAdapter = {
             destination: params?.destination
         });
         if (cachedLoads.length > 0) {
-            // Фильтруем кэш по параметрам поиска (origin/destination/equipment)
-            const filtered = filterByParams(cachedLoads, params);
-            console.log('[AIDA/TruckerPath] Cached:', cachedLoads.length, '→ after filter:', filtered.length);
-            if (filtered.length > 0) {
-                return { ok: true, loads: filtered, meta: { board: BOARD, source: 'cache' } };
-            }
-            // Есть кэш, но ничего не подходит под поиск
-            return {
-                ok: true, loads: [], meta: { board: BOARD, source: 'cache' },
-                error: { code: 'NO_MATCH', message: `TruckerPath: ${cachedLoads.length} cached loads, 0 match your search. Search on TruckerPath tab with the same route.`, retriable: false }
-            };
+            console.log('[AIDA/TruckerPath] Using cached loads from harvester:', cachedLoads.length);
+            return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache' } };
         }
         if (!template || !template.url) {
             console.warn('[AIDA/TruckerPath] No template: run search on TruckerPath tab once to capture request');
@@ -265,56 +256,6 @@ const TruckerpathAdapter = {
         };
     }
 };
-
-/**
- * Фильтрация грузов по параметрам поиска пользователя.
- * Проверяем: origin city/state, destination city/state, equipment.
- * Если параметр не задан — пропускаем проверку.
- */
-function filterByParams(loads, params) {
-    if (!params || typeof params !== 'object') return loads;
-
-    const originCity = (params.origin?.city || '').toLowerCase().trim();
-    const originState = (params.origin?.state || '').toUpperCase().trim();
-    const destCity = (params.destination?.city || '').toLowerCase().trim();
-    const destState = (params.destination?.state || '').toUpperCase().trim();
-    const equipment = (params.equipment || '').toUpperCase().trim();
-    const radius = params.radius || 200; // широкий радиус по умолчанию
-
-    // Если ни origin ни destination не заданы — вернуть всё
-    if (!originCity && !originState && !destCity && !destState) return loads;
-
-    return loads.filter(load => {
-        // Проверка origin
-        if (originState) {
-            const loadOriginState = (load.origin?.state || '').toUpperCase().trim();
-            if (loadOriginState && loadOriginState !== originState) return false;
-        }
-        if (originCity) {
-            const loadOriginCity = (load.origin?.city || '').toLowerCase().trim();
-            // Мягкое сравнение: содержится или начинается
-            if (loadOriginCity && !loadOriginCity.includes(originCity) && !originCity.includes(loadOriginCity)) return false;
-        }
-
-        // Проверка destination
-        if (destState) {
-            const loadDestState = (load.destination?.state || '').toUpperCase().trim();
-            if (loadDestState && loadDestState !== destState) return false;
-        }
-        if (destCity) {
-            const loadDestCity = (load.destination?.city || '').toLowerCase().trim();
-            if (loadDestCity && !loadDestCity.includes(destCity) && !destCity.includes(loadDestCity)) return false;
-        }
-
-        // Проверка equipment (если задано)
-        if (equipment && equipment !== 'OTHER') {
-            const loadEquip = (load.equipment || '').toUpperCase().trim();
-            if (loadEquip && loadEquip !== equipment && loadEquip !== 'UNKNOWN') return false;
-        }
-
-        return true;
-    });
-}
 
 export default TruckerpathAdapter;
 export { normalizeTruckerpathResults };
