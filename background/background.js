@@ -305,10 +305,7 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
         console.warn('[AIDA/Core] handleDatSearchResponse: empty or not array');
         return;
     }
-    console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} raw cards`);
-    for (let i = 0; i < Math.min(3, rawResults.length); i++) {
-        console.log(`[AIDA/Core] DAT card[${i}]:`, JSON.stringify(rawResults[i]));
-    }
+    console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} loads`);
     const loads = normalizeDatResults(rawResults);
     if (loads.length === 0) {
         console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
@@ -328,10 +325,7 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
 
 async function handleTruckstopSearchResponse(rawResults) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
-    console.log(`[AIDA/Core] TS INTERCEPT — ${rawResults.length} raw cards`);
-    for (let i = 0; i < Math.min(3, rawResults.length); i++) {
-        console.log(`[AIDA/Core] TS card[${i}]:`, JSON.stringify(rawResults[i]));
-    }
+    console.log(`[AIDA/Core] TS INTERCEPT — ${rawResults.length} loads`);
     const loads = normalizeTruckstopResults(rawResults);
     if (loads.length === 0) return;
     const existing = await Storage.getLoads();
@@ -342,12 +336,7 @@ async function handleTruckstopSearchResponse(rawResults) {
 
 async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
-    console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} raw cards`);
-    // Показываем ПОЛНЫЙ JSON карточек для анализа
-    console.log('[AIDA/Core] TP ALL RAW CARDS (' + rawResults.length + '):');
-    rawResults.forEach((card, i) => {
-        console.log(`[AIDA/Core] TP card[${i}]:`, JSON.stringify(card));
-    });
+    console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} loads`);
     let loads;
     try {
         loads = normalizeTruckerpathResults(rawResults, {});
@@ -357,9 +346,6 @@ async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     }
     if (!loads || loads.length === 0) return;
     console.log(`[AIDA/Core] TP normalized: ${loads.length} loads`);
-    loads.forEach((l, i) => {
-        console.log(`  [${i}] ${l.origin?.city}, ${l.origin?.state} → ${l.destination?.city}, ${l.destination?.state} | broker: ${l.broker?.name || '❌ EMPTY'} | phone: ${l.broker?.phone || '❌'}`);
-    });
     const existing = await Storage.getLoads();
     const merged = mergeLoadsByBoard(existing, loads, 'tp');
     await Storage.setLoads(merged);
