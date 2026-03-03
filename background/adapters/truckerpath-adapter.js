@@ -347,11 +347,26 @@ const TruckerpathAdapter = {
                 body = body.replace(/"max"\s*:\s*\d+/, `"max":${Number(params.radius) || 200}`);
             }
             if (params.dateFrom) {
-                body = body.replace(/"from"\s*:\s*"[^"]*"/, `"from":"${String(params.dateFrom).slice(0, 10)}"`);
+                body = body.replace(/"from"\s*:\s*"[^"]*"/, `"from":"${String(params.dateFrom).slice(0, 10)}T00:00:00"`);
             }
             if (params.dateTo) {
-                body = body.replace(/"to"\s*:\s*"[^"]*"/, `"to":"${String(params.dateTo).slice(0, 10)}"`);
+                body = body.replace(/"to"\s*:\s*"[^"]*"/, `"to":"${String(params.dateTo).slice(0, 10)}T23:59:59"`);
             }
+
+            // Equipment mapping: AIDA → TP (lowercase)
+            if (params.equipment) {
+                const TP_EQ_MAP = {
+                    'VAN': 'van', 'REEFER': 'reefer', 'FLATBED': 'flatbed',
+                    'STEPDECK': 'step_deck', 'TANKER': 'tanker', 'HAZMAT': 'hazmat',
+                    'BULK': 'bulk', 'SPECIALIZED': 'specialized', 'OTHER': 'other'
+                };
+                const tpEq = TP_EQ_MAP[params.equipment.toUpperCase()] || params.equipment.toLowerCase();
+                body = body.replace(/"equipment"\s*:\s*\[[^\]]*\]/, `"equipment":["${tpEq}"]`);
+                console.log('[AIDA/TruckerPath] Body patched: equipment→', tpEq);
+            }
+
+            // Обновляем mark_new_since на текущее время
+            body = body.replace(/"mark_new_since"\s*:\s*"[^"]*"/, `"mark_new_since":"${new Date().toISOString()}"`);
 
             const headers = { ...(template.headers || {}) };
             if (!headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = 'application/json';
