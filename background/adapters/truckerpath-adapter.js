@@ -320,11 +320,29 @@ const TruckerpathAdapter = {
                 }
             }
 
-            let body = template.body;
-            try {
-                body = modifyTemplateBody(body, enrichedParams);
-            } catch (e) {
-                console.warn('[AIDA/TruckerPath] Step: body modify failed, using original:', e?.message);
+            let body = typeof template.body === 'string' ? template.body : JSON.stringify(template.body);
+
+            // Прямая замена координат и адреса в body строке (regex, гарантированно работает)
+            if (enrichedParams._originGeo) {
+                const { lat, lon } = enrichedParams._originGeo;
+                // Заменяем первое вхождение "lat":число и "lng":число
+                body = body.replace(/"lat"\s*:\s*-?[\d.]+/, `"lat":${lat}`);
+                body = body.replace(/"lng"\s*:\s*-?[\d.]+/, `"lng":${lon}`);
+                console.log('[AIDA/TruckerPath] Body patched: lat→', lat, 'lng→', lon);
+            }
+            if (params.origin?.city) {
+                const addr = `${params.origin.city},${params.origin.state || ''},US`;
+                body = body.replace(/"address"\s*:\s*"[^"]*"/, `"address":"${addr}"`);
+                console.log('[AIDA/TruckerPath] Body patched: address→', addr);
+            }
+            if (params.radius != null) {
+                body = body.replace(/"max"\s*:\s*\d+/, `"max":${Number(params.radius) || 200}`);
+            }
+            if (params.dateFrom) {
+                body = body.replace(/"from"\s*:\s*"[^"]*"/, `"from":"${String(params.dateFrom).slice(0, 10)}"`);
+            }
+            if (params.dateTo) {
+                body = body.replace(/"to"\s*:\s*"[^"]*"/, `"to":"${String(params.dateTo).slice(0, 10)}"`);
             }
 
             const headers = { ...(template.headers || {}) };
