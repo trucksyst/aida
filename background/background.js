@@ -262,12 +262,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case 'TOGGLE_BOARD': {
-            const { board, enabled } = message;
+            const { board } = message;
             Storage.getSettings().then(async settings => {
                 const disabledBoards = settings.disabledBoards || {};
-                disabledBoards[board] = !enabled;
+                const wasDisabled = !!disabledBoards[board];
+                disabledBoards[board] = !wasDisabled; // flip
                 await Storage.saveSettings({ disabledBoards });
-                await pushToUI({ settings: await getSettingsForUI() });
+
+                // При ВЫКЛЮЧЕНИИ — удаляем все грузы этого борда
+                if (!wasDisabled) {
+                    const loads = await Storage.getLoads();
+                    const filtered = loads.filter(l => l.board !== board);
+                    await Storage.setLoads(filtered);
+                    console.log(`[AIDA/Core] Board ${board} disabled — removed ${loads.length - filtered.length} loads`);
+                    await pushToUI({ loads: filtered, settings: await getSettingsForUI() });
+                } else {
+                    console.log(`[AIDA/Core] Board ${board} enabled`);
+                    await pushToUI({ settings: await getSettingsForUI() });
+                }
                 sendResponse({ ok: true });
             }).catch(err => sendResponse({ error: err.message }));
             return true;

@@ -379,27 +379,12 @@ function bindEvents() {
         toggleAgent(e.target.checked);
     });
 
-    // Board toggle buttons:
-    // 🟢 connected → клик → отключить
-    // 🔴 disabled  → клик → включить
-    // 🔴 not connected → клик → открыть логин popup
+    // Board toggle buttons — простой ВКЛ/ВЫКЛ.
+    // Клик = flip состояния. При выключении — грузы борда удаляются.
     document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
         btn.addEventListener('click', () => {
             const board = btn.dataset.board;
-            const bs = state.boardStatus[board] || {};
-            const connected = !!bs.connected;
-            const disabled = !!bs.disabled;
-
-            if (connected) {
-                // Подключён → отключить
-                toggleBoard(board, false);
-            } else if (disabled) {
-                // Отключён юзером → включить обратно
-                toggleBoard(board, true);
-            } else {
-                // Не подключён, не отключён → открыть логин
-                loginBoard(board);
-            }
+            sendToCore('TOGGLE_BOARD', { board });
         });
     });
 }
@@ -931,8 +916,8 @@ function updateAgentStatus() {
 // ============================================================
 
 /** Обновить кнопки-индикаторы бордов по state.boardStatus.
- *  Только два состояния: 🟢 connected (работает) или 🔴 off (всё остальное).
- *  Вся авторизация — автоматическая, кнопка = только toggle вкл/выкл.
+ *  🟢 = ВКЛ (enabled), 🔴 = ВЫКЛ (disabled).
+ *  Клик = toggle.
  */
 function updateBoardDots() {
     const boards = ['dat', 'truckstop', 'tp'];
@@ -940,20 +925,16 @@ function updateBoardDots() {
         const btn = document.getElementById(`board-btn-${board}`);
         if (!btn) continue;
         const bs = state.boardStatus[board];
-        const isOldFormat = typeof bs === 'boolean' || bs === undefined;
-        const connected = isOldFormat ? !!bs : !!bs?.connected;
-        const disabled = isOldFormat ? false : !!bs?.disabled;
+        const disabled = typeof bs === 'object' ? !!bs?.disabled : false;
 
         btn.classList.remove('connected', 'has-token', 'disabled', 'expired', 'no-token', 'logging-in');
 
-        if (!disabled && connected) {
+        if (disabled) {
+            btn.classList.add('disabled');
+            btn.title = `${board.toUpperCase()} — OFF (click to enable)`;
+        } else {
             btn.classList.add('connected');
             btn.title = `${board.toUpperCase()} — ON (click to disable)`;
-        } else {
-            btn.classList.add('disabled');
-            btn.title = disabled
-                ? `${board.toUpperCase()} — OFF (click to enable)`
-                : `${board.toUpperCase()} — not connected`;
         }
     }
 }
