@@ -353,25 +353,19 @@ const TruckerpathAdapter = {
                 body = body.replace(/"to"\s*:\s*"[^"]*"/, `"to":"${String(params.dateTo).slice(0, 10)}T23:59:59"`);
             }
 
-            // Equipment mapping: AIDA → TP (lowercase)
-            if (params.equipment) {
-                const TP_EQ_MAP = {
-                    'VAN': 'van', 'REEFER': 'reefer', 'FLATBED': 'flatbed',
-                    'STEPDECK': 'step_deck', 'TANKER': 'tanker', 'HAZMAT': 'hazmat',
-                    'BULK': 'bulk', 'SPECIALIZED': 'specialized', 'OTHER': 'other'
-                };
-                const tpEq = TP_EQ_MAP[params.equipment.toUpperCase()] || params.equipment.toLowerCase();
-                body = body.replace(/"equipment"\s*:\s*\[[^\]]*\]/, `"equipment":["${tpEq}"]`);
-                console.log('[AIDA/TruckerPath] Body patched: equipment→', tpEq);
-            }
-
-            // Обновляем mark_new_since на текущее время
-            body = body.replace(/"mark_new_since"\s*:\s*"[^"]*"/, `"mark_new_since":"${new Date().toISOString()}"`);
-
             const headers = { ...(template.headers || {}) };
             if (!headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = 'application/json';
-            if (!headers['Origin']) headers['Origin'] = 'https://loadboard.truckerpath.com';
-            if (!headers['Referer']) headers['Referer'] = 'https://loadboard.truckerpath.com/';
+            // Принудительно ставим Origin/Referer — Chrome из extension ставит chrome-extension://
+            delete headers['origin']; delete headers['Origin'];
+            delete headers['referer']; delete headers['Referer'];
+            headers['Origin'] = 'https://loadboard.truckerpath.com';
+            headers['Referer'] = 'https://loadboard.truckerpath.com/';
+            // Удаляем sec-fetch-* — Chrome перезаписывает, но лишние мешают
+            for (const k of Object.keys(headers)) {
+                if (k.toLowerCase().startsWith('sec-fetch-') || k === ':authority' || k === ':method' || k === ':path' || k === ':scheme') {
+                    delete headers[k];
+                }
+            }
             if (Array.isArray(template.cookies) && template.cookies.length > 0) {
                 headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
             }
