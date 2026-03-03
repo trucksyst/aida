@@ -416,9 +416,49 @@ function modifyTemplateBody(body, params) {
     const parsed = typeof body === 'string' ? JSON.parse(body) : body;
     if (!parsed || typeof parsed !== 'object') return body;
 
-    // Полный рекурсивный обход — TP body хранит координаты на любом уровне вложенности
-    // (напр. query.pickup.geo.location.lat/lng)
-    const modified = deepPatchAll(parsed, params);
+    let modified = false;
+
+    // ===== Прямой патч для TP REST API: query.pickup.geo.location =====
+    const pickupLoc = parsed.query?.pickup?.geo?.location;
+    if (pickupLoc && params._originGeo) {
+        pickupLoc.lat = params._originGeo.lat;
+        pickupLoc.lng = params._originGeo.lon;
+        if (params.origin?.city) {
+            pickupLoc.address = `${params.origin.city},${params.origin.state || ''},US`;
+        }
+        modified = true;
+        console.log('[AIDA/TruckerPath] Direct patch: pickup.geo.location →', pickupLoc.lat, pickupLoc.lng, pickupLoc.address);
+    }
+
+    // Deadhead (radius)
+    const pickupDh = parsed.query?.pickup?.geo?.deadhead;
+    if (pickupDh && params.radius != null) {
+        pickupDh.max = Number(params.radius) || 200;
+        modified = true;
+    }
+
+    // Dropoff location
+    const dropoffLoc = parsed.query?.dropoff?.geo?.location;
+    if (dropoffLoc && params._destGeo) {
+        dropoffLoc.lat = params._destGeo.lat;
+        dropoffLoc.lng = params._destGeo.lon;
+        if (params.destination?.city) {
+            dropoffLoc.address = `${params.destination.city},${params.destination.state || ''},US`;
+        }
+        modified = true;
+    }
+
+    // Pickup dates
+    const pickupDate = parsed.query?.pickup?.date_local;
+    if (pickupDate) {
+        if (params.dateFrom) { pickupDate.from = String(params.dateFrom).slice(0, 10); modified = true; }
+        if (params.dateTo) { pickupDate.to = String(params.dateTo).slice(0, 10); modified = true; }
+    }
+
+    // ===== Fallback: generic deep walk =====
+    if (!modified) {
+        modified = deepPatchAll(parsed, params);
+    }
 
     if (modified) {
         console.log('[AIDA/TruckerPath] Step: modified template body with new search params');
