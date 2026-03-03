@@ -691,11 +691,10 @@ body {
     background: var(--warning);
 }
 
-/* Disabled by user: перечёркнутый, красная граница */
+/* Disabled by user: красная точка, приглушённый вид */
 .board-toggle.disabled {
     border-color: var(--danger);
     opacity: 0.55;
-    text-decoration: line-through;
 }
 
 .board-toggle.disabled .board-dot {
