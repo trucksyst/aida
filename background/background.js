@@ -35,6 +35,10 @@ console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14
 
 /* Дедупликация отключена — удаляла грузы с одинаковым city+date при пустом phone */
 
+/** Cooldown (мс) после searchLoads — игнорируем harvester intercepts, чтобы не перезаписать результаты AIDA search. */
+const SEARCH_COOLDOWN_MS = 10_000;
+let _searchCooldownUntil = 0;
+
 /** Мерж: заменяем только грузы конкретного борда, остальные сохраняем. */
 function mergeLoadsByBoard(existing, newLoads, board) {
     const other = (existing || []).filter(l => l.board !== board);
@@ -306,6 +310,10 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
         return;
     }
     console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} loads`);
+    if (Date.now() < _searchCooldownUntil) {
+        console.log('[AIDA/Core] DAT INTERCEPT skipped (search cooldown)');
+        return;
+    }
     const loads = normalizeDatResults(rawResults);
     if (loads.length === 0) {
         console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
@@ -326,6 +334,10 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
 async function handleTruckstopSearchResponse(rawResults) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TS INTERCEPT — ${rawResults.length} loads`);
+    if (Date.now() < _searchCooldownUntil) {
+        console.log('[AIDA/Core] TS INTERCEPT skipped (search cooldown)');
+        return;
+    }
     const loads = normalizeTruckstopResults(rawResults);
     if (loads.length === 0) return;
     const existing = await Storage.getLoads();
@@ -337,6 +349,10 @@ async function handleTruckstopSearchResponse(rawResults) {
 async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} loads`);
+    if (Date.now() < _searchCooldownUntil) {
+        console.log('[AIDA/Core] TP INTERCEPT skipped (search cooldown)');
+        return;
+    }
     let loads;
     try {
         loads = normalizeTruckerpathResults(rawResults, {});
@@ -485,6 +501,7 @@ async function searchLoads(params) {
 
     await Storage.clearActive();
     await Storage.setLoads(loads);
+    _searchCooldownUntil = Date.now() + SEARCH_COOLDOWN_MS;
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
 
