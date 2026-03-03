@@ -3,7 +3,7 @@
   "minimum_chrome_version": "114",
   "name": "AIDA — AI Dispatcher",
   "short_name": "AIDA",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Персональный инструмент диспетчера. Агрегирует грузы со всех лоадбордов в одном окне.",
 
   "background": {
