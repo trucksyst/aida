@@ -31,7 +31,7 @@ import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truc
 
 const AIDA_UI_URL = chrome.runtime.getURL('ui/app.html');
 const BUILD = chrome.runtime.getManifest().version;
-console.log(`[AIDA/Core] Service Worker started — build ${BUILD}`);
+console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14px;background:#222;padding:2px 8px;border-radius:4px');
 
 /* Дедупликация отключена — удаляла грузы с одинаковым city+date при пустом phone */
 

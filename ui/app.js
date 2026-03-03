@@ -49,7 +49,10 @@ function sendToCore(type, payload = {}) {
 // ============================================================
 
 async function init() {
-    console.log('[AIDA/UI] Step: init start');
+    const buildVersion = chrome.runtime.getManifest().version;
+    console.log(`%c[AIDA/UI] build ${buildVersion}`, 'color:#0f0;font-weight:bold;font-size:13px');
+    const buildEl = document.getElementById('status-build');
+    if (buildEl) buildEl.textContent = `v${buildVersion}`;
     const resp = await sendToCore('GET_SETTINGS');
     console.log('[AIDA/UI] Step: GET_SETTINGS', resp?.settings ? 'ok' : 'empty');
     if (resp?.settings) {
