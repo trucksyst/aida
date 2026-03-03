@@ -112,7 +112,7 @@ function generateEmail(load, dispatcher) {
     const rateStr = load.rate ? `$${load.rate.toLocaleString()} posted` : 'rate TBD';
 
     const body = [
-        `Hi ${load.broker?.name || 'there'},`,
+        `Hi ${load.broker?.company || 'there'},`,
         '',
         `I'm interested in your load:`,
         `  ${origin} → ${dest}`,

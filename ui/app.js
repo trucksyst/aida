@@ -452,13 +452,11 @@ function getSearchParams() {
     return {
         origin: {
             city: document.getElementById('origin-city').value.trim(),
-            state: document.getElementById('origin-state').value.trim().toUpperCase(),
-            zip: ''
+            state: document.getElementById('origin-state').value.trim().toUpperCase()
         },
         destination: {
             city: document.getElementById('dest-city').value.trim(),
-            state: document.getElementById('dest-state').value.trim().toUpperCase(),
-            zip: ''
+            state: document.getElementById('dest-state').value.trim().toUpperCase()
         },
         radius: parseInt(document.getElementById('search-radius').value) || 50,
         equipment: document.getElementById('equipment').value,

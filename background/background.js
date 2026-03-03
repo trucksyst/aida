@@ -424,7 +424,7 @@ async function fetchDatProfile(token) {
 
 /**
  * Параллельный поиск по всем подключённым бордам.
- * Дедупликация по origin.zip + destination.zip + pickupDate + broker.phone.
+ * Дедупликация по origin.city + destination.city + pickupDate + broker.phone.
  */
 async function searchLoads(params) {
     if (!params) throw new Error('No search params');
