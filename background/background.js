@@ -565,10 +565,11 @@ async function searchLoads(params) {
     let tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
 
     // ---- AUTO-RESOLVE AUTH ERRORS ----
-    // Если есть борды с AUTH_REQUIRED → пробуем silent refresh → popup → retry
-    if (authErrors.length > 0) {
-        console.log(`[AIDA/Core] Auth errors from ${authErrors.length} board(s):`, authErrors.map(e => e.board));
-        const { resolved } = await AuthManager.autoResolveAuthErrors(authErrors);
+    // Фильтруем disabled борды — для них НЕ открываем попы, НЕ делаем запросы
+    const activeAuthErrors = authErrors.filter(e => !disabled[e.board]);
+    if (activeAuthErrors.length > 0) {
+        console.log(`[AIDA/Core] Auth errors from ${activeAuthErrors.length} board(s):`, activeAuthErrors.map(e => e.board));
+        const { resolved } = await AuthManager.autoResolveAuthErrors(activeAuthErrors);
 
         // Retry ТОЛЬКО борды, которые удалось авторизовать
         if (resolved.length > 0) {
