@@ -429,7 +429,6 @@ function patchSearchParams(target, params) {
         if (target.origin && typeof target.origin === 'object') {
             if (target.origin.city !== undefined) { target.origin.city = params.origin.city || ''; modified = true; }
             if (target.origin.state !== undefined) { target.origin.state = params.origin.state || ''; modified = true; }
-            if (target.origin.zip !== undefined) { target.origin.zip = params.origin.zip || ''; modified = true; }
         }
         if (target.pickupLocation && typeof target.pickupLocation === 'object') {
             if (target.pickupLocation.city !== undefined) { target.pickupLocation.city = params.origin.city || ''; modified = true; }
