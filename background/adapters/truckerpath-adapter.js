@@ -21,6 +21,25 @@ async function rateLimit() {
     _lastRequestTime = Date.now();
 }
 
+/** Геокодировка city+state → {lat, lon} через Nominatim (бесплатно, без ключа). */
+async function geocodeCity(city, state) {
+    if (!city && !state) return null;
+    const q = [city, state].filter(Boolean).join(', ') + ', USA';
+    try {
+        const resp = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+            { headers: { 'Accept': 'application/json', 'User-Agent': 'AIDA/1.0' } }
+        );
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const first = Array.isArray(data) && data[0];
+        if (!first || first.lat == null) return null;
+        return { lat: parseFloat(first.lat), lon: parseFloat(first.lon) };
+    } catch {
+        return null;
+    }
+}
+
 function parseMiles(value) {
     if (value == null) return null;
     const s = String(value).replace(/,/g, '');
@@ -281,9 +300,29 @@ const TruckerpathAdapter = {
         // 1) Если есть template — делаем реальный запрос с подставленными параметрами
         if (template && template.url) {
             await rateLimit();
+
+            // Геокодируем origin/destination → координаты для TP API
+            const enrichedParams = { ...params };
+            if (params.origin && (params.origin.city || params.origin.state)) {
+                const geo = await geocodeCity(params.origin.city, params.origin.state);
+                if (geo) {
+                    enrichedParams._originGeo = geo;
+                    console.log('[AIDA/TruckerPath] Geocoded origin:', params.origin.city, params.origin.state, '→', geo.lat, geo.lon);
+                } else {
+                    console.warn('[AIDA/TruckerPath] Failed to geocode origin:', params.origin.city, params.origin.state);
+                }
+            }
+            if (params.destination && (params.destination.city || params.destination.state)) {
+                const geo = await geocodeCity(params.destination.city, params.destination.state);
+                if (geo) {
+                    enrichedParams._destGeo = geo;
+                    console.log('[AIDA/TruckerPath] Geocoded dest:', params.destination.city, params.destination.state, '→', geo.lat, geo.lon);
+                }
+            }
+
             let body = template.body;
             try {
-                body = modifyTemplateBody(body, params);
+                body = modifyTemplateBody(body, enrichedParams);
             } catch (e) {
                 console.warn('[AIDA/TruckerPath] Step: body modify failed, using original:', e?.message);
             }
@@ -412,11 +451,15 @@ function patchSearchParams(target, params) {
 
     // Origin: lat/lon или city/state
     if (params.origin) {
-        // Lat/lon ключи
+        // Lat/lon ключи — подставляем геокодированные координаты (или сохраняем оригинал)
         const latKeys = ['latitude', 'lat', 'origin_lat', 'dh_origin_lat', 'originLatitude', 'pickup_lat'];
         const lonKeys = ['longitude', 'lon', 'lng', 'origin_lon', 'dh_origin_lon', 'originLongitude', 'pickup_lon'];
-        for (const k of latKeys) { if (target[k] !== undefined) { target[k] = null; } }
-        for (const k of lonKeys) { if (target[k] !== undefined) { target[k] = null; } }
+        const originGeo = params._originGeo; // { lat, lon } от geocodeCity
+        if (originGeo) {
+            for (const k of latKeys) { if (target[k] !== undefined) { target[k] = originGeo.lat; modified = true; } }
+            for (const k of lonKeys) { if (target[k] !== undefined) { target[k] = originGeo.lon; modified = true; } }
+        }
+        // Если нет координат — не трогаем lat/lon (оставляем оригинал шаблона)
 
         // City / state ключи
         const cityKeys = ['city', 'originCity', 'origin_city', 'pickup_city'];
@@ -441,6 +484,14 @@ function patchSearchParams(target, params) {
 
     // Destination
     if (params.destination && (params.destination.city || params.destination.state)) {
+        // Destination lat/lon — подставляем геокодированные, если есть
+        const destGeo = params._destGeo;
+        if (destGeo) {
+            const destLatKeys = ['dest_lat', 'destinationLatitude', 'dropoff_lat', 'delivery_lat'];
+            const destLonKeys = ['dest_lon', 'dest_lng', 'destinationLongitude', 'dropoff_lon', 'delivery_lon'];
+            for (const k of destLatKeys) { if (target[k] !== undefined) { target[k] = destGeo.lat; modified = true; } }
+            for (const k of destLonKeys) { if (target[k] !== undefined) { target[k] = destGeo.lon; modified = true; } }
+        }
         const destCityKeys = ['destCity', 'destinationCity', 'destination_city', 'dropoff_city'];
         const destStateKeys = ['destState', 'destinationState', 'destination_state', 'dropoff_state'];
         for (const k of destCityKeys) {
