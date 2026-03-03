@@ -40,7 +40,15 @@ const AuthManager = {
     async login(board) {
         const module = AUTH_MODULES[board];
         if (!module) {
-            console.warn(`[AIDA/Auth] No auth module for board: ${board}`);
+            // Борды без auth-модуля — открываем сайт борда в popup.
+            // Юзер залогинится → харвестер поймает токен/шаблон.
+            const url = this._boardUrls[board];
+            if (url) {
+                console.log(`[AIDA/Auth] Opening fallback login popup for ${board}: ${url}`);
+                const success = await this._openFallbackPopup(board, url);
+                return { ok: success };
+            }
+            console.warn(`[AIDA/Auth] No auth module and no URL for board: ${board}`);
             return { ok: false, error: `Auth not implemented for ${board}` };
         }
         try {

@@ -379,14 +379,27 @@ function bindEvents() {
         toggleAgent(e.target.checked);
     });
 
-    // Board toggle buttons — просто toggle ВКЛ/ВЫКЛ.
-    // Вся авторизация — автоматическая (при поиске / при открытии).
+    // Board toggle buttons:
+    // 🟢 connected → клик → отключить
+    // 🔴 disabled  → клик → включить
+    // 🔴 not connected → клик → открыть логин popup
     document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
         btn.addEventListener('click', () => {
             const board = btn.dataset.board;
             const bs = state.boardStatus[board] || {};
-            const currentlyDisabled = !!bs.disabled;
-            toggleBoard(board, currentlyDisabled); // toggle: disabled → enable, enabled → disable
+            const connected = !!bs.connected;
+            const disabled = !!bs.disabled;
+
+            if (connected) {
+                // Подключён → отключить
+                toggleBoard(board, false);
+            } else if (disabled) {
+                // Отключён юзером → включить обратно
+                toggleBoard(board, true);
+            } else {
+                // Не подключён, не отключён → открыть логин
+                loginBoard(board);
+            }
         });
     });
 }
