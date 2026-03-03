@@ -72,9 +72,24 @@ async function init() {
     document.getElementById('date-to').value = in3days;
 
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
+    let hasSearchParams = false;
     if (resp?.settings?.lastSearch) {
         applyLastSearch(resp.settings.lastSearch);
+        hasSearchParams = !!(resp.settings.lastSearch.origin?.city || resp.settings.lastSearch.origin?.state);
         console.log('[AIDA/UI] Step: applied last search (origin, destination, dates, etc.)');
+    }
+
+    // Если нет lastSearch — попробуем взять город компании из настроек как дефолт
+    if (!hasSearchParams) {
+        const user = resp?.settings?.user || {};
+        const companyCity = user.city || user.companyCity || '';
+        const companyState = user.state || user.companyState || '';
+        if (companyCity || companyState) {
+            setVal('origin-city', companyCity);
+            setVal('origin-state', (companyState || '').toUpperCase().slice(0, 2));
+            hasSearchParams = true;
+            console.log('[AIDA/UI] Step: using company location as default:', companyCity, companyState);
+        }
     }
 
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
@@ -86,6 +101,14 @@ async function init() {
     // Единственная подписка на обновления — push от Core (контракт API)
     chrome.runtime.onMessage.addListener(onDataUpdated);
     console.log('[AIDA/UI] Step: init done. Listening for DATA_UPDATED from Core.');
+
+    // ---- AUTO-SEARCH при открытии ----
+    // Если есть параметры поиска (lastSearch или defaults) → запускаем поиск автоматически
+    if (hasSearchParams) {
+        console.log('[AIDA/UI] Step: auto-search on init');
+        // Небольшая задержка чтобы UI успел отрисоваться
+        setTimeout(() => doSearch(), 300);
+    }
 }
 
 function applySettings(settings) {
