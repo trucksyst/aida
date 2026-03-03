@@ -440,7 +440,20 @@ function modifyTemplateBody(body, params) {
     const nestedKeys = ['filter', 'data', 'args', 'input', 'search', 'query', 'params', 'criteria', 'options'];
     for (const k of nestedKeys) {
         if (parsed[k] && typeof parsed[k] === 'object' && !Array.isArray(parsed[k])) {
+            // Логируем ключи вложенного объекта для диагностики
+            console.log(`[AIDA/TruckerPath] patching nested "${k}", keys:`, Object.keys(parsed[k]).join(', '));
             modified = patchSearchParams(parsed[k], params) || modified;
+            // Рекурсия на 1 уровень глубже (filter.location, filter.pickup, etc.)
+            for (const sk of Object.keys(parsed[k])) {
+                const sub = parsed[k][sk];
+                if (sub && typeof sub === 'object' && !Array.isArray(sub)) {
+                    const subPatched = patchSearchParams(sub, params);
+                    if (subPatched) {
+                        console.log(`[AIDA/TruckerPath] patched nested "${k}.${sk}"`);
+                        modified = true;
+                    }
+                }
+            }
         }
     }
 
