@@ -416,52 +416,30 @@ function modifyTemplateBody(body, params) {
     const parsed = typeof body === 'string' ? JSON.parse(body) : body;
     if (!parsed || typeof parsed !== 'object') return body;
 
-    let modified = false;
-
-    // GraphQL-стиль: { variables: { ... } }
-    if (parsed.variables && typeof parsed.variables === 'object') {
-        const vars = parsed.variables;
-        modified = patchSearchParams(vars, params) || modified;
-        // Вложенные args/input
-        if (vars.args && typeof vars.args === 'object') {
-            modified = patchSearchParams(vars.args, params) || modified;
-        }
-        if (vars.input && typeof vars.input === 'object') {
-            modified = patchSearchParams(vars.input, params) || modified;
-        }
-    }
-
-    // REST-стиль: патчим верхний уровень + все известные вложенные объекты
-    if (!parsed.variables) {
-        modified = patchSearchParams(parsed, params) || modified;
-    }
-
-    // Рекурсивный обход вложенных объектов (filter, data, args, search, query, params, criteria)
-    const nestedKeys = ['filter', 'data', 'args', 'input', 'search', 'query', 'params', 'criteria', 'options'];
-    for (const k of nestedKeys) {
-        if (parsed[k] && typeof parsed[k] === 'object' && !Array.isArray(parsed[k])) {
-            // Логируем ключи вложенного объекта для диагностики
-            console.log(`[AIDA/TruckerPath] patching nested "${k}", keys:`, Object.keys(parsed[k]).join(', '));
-            modified = patchSearchParams(parsed[k], params) || modified;
-            // Рекурсия на 1 уровень глубже (filter.location, filter.pickup, etc.)
-            for (const sk of Object.keys(parsed[k])) {
-                const sub = parsed[k][sk];
-                if (sub && typeof sub === 'object' && !Array.isArray(sub)) {
-                    const subPatched = patchSearchParams(sub, params);
-                    if (subPatched) {
-                        console.log(`[AIDA/TruckerPath] patched nested "${k}.${sk}"`);
-                        modified = true;
-                    }
-                }
-            }
-        }
-    }
+    // Полный рекурсивный обход — TP body хранит координаты на любом уровне вложенности
+    // (напр. query.pickup.geo.location.lat/lng)
+    const modified = deepPatchAll(parsed, params);
 
     if (modified) {
         console.log('[AIDA/TruckerPath] Step: modified template body with new search params');
         return JSON.stringify(parsed);
     }
     return typeof body === 'string' ? body : JSON.stringify(parsed);
+}
+
+/** Рекурсивный обход объекта — вызывает patchSearchParams на каждом уровне. */
+function deepPatchAll(obj, params, depth = 0) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 8) return false;
+    let modified = patchSearchParams(obj, params);
+    for (const k of Object.keys(obj)) {
+        const child = obj[k];
+        if (child && typeof child === 'object' && !Array.isArray(child)) {
+            if (deepPatchAll(child, params, depth + 1)) {
+                modified = true;
+            }
+        }
+    }
+    return modified;
 }
 
 /** Подставить origin/destination/radius/dates/equipment в объект. */
@@ -499,6 +477,12 @@ function patchSearchParams(target, params) {
         if (target.pickupLocation && typeof target.pickupLocation === 'object') {
             if (target.pickupLocation.city !== undefined) { target.pickupLocation.city = params.origin.city || ''; modified = true; }
             if (target.pickupLocation.state !== undefined) { target.pickupLocation.state = params.origin.state || ''; modified = true; }
+        }
+
+        // TP format: location.address = "City,ST,US"
+        if (target.address !== undefined && typeof target.address === 'string' && params.origin.city) {
+            target.address = `${params.origin.city},${params.origin.state || ''},US`;
+            modified = true;
         }
     }
 
