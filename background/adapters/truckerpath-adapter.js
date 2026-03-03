@@ -422,19 +422,26 @@ function modifyTemplateBody(body, params) {
     if (parsed.variables && typeof parsed.variables === 'object') {
         const vars = parsed.variables;
         modified = patchSearchParams(vars, params) || modified;
-        // Вложенные args: { variables: { args: { ... } } }
+        // Вложенные args/input
         if (vars.args && typeof vars.args === 'object') {
             modified = patchSearchParams(vars.args, params) || modified;
         }
-        // Input pattern: { variables: { input: { ... } } }
         if (vars.input && typeof vars.input === 'object') {
             modified = patchSearchParams(vars.input, params) || modified;
         }
     }
 
-    // REST-стиль (плоская структура)
+    // REST-стиль: патчим верхний уровень + все известные вложенные объекты
     if (!parsed.variables) {
         modified = patchSearchParams(parsed, params) || modified;
+    }
+
+    // Рекурсивный обход вложенных объектов (filter, data, args, search, query, params, criteria)
+    const nestedKeys = ['filter', 'data', 'args', 'input', 'search', 'query', 'params', 'criteria', 'options'];
+    for (const k of nestedKeys) {
+        if (parsed[k] && typeof parsed[k] === 'object' && !Array.isArray(parsed[k])) {
+            modified = patchSearchParams(parsed[k], params) || modified;
+        }
     }
 
     if (modified) {
