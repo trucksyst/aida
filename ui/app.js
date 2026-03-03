@@ -356,35 +356,14 @@ function bindEvents() {
         toggleAgent(e.target.checked);
     });
 
-    // Board toggle buttons — двойная логика:
-    //   Нет токена + есть auth-модуль → открыть логин
-    //   Есть токен → включить/выключить борд
+    // Board toggle buttons — просто toggle ВКЛ/ВЫКЛ.
+    // Вся авторизация — автоматическая (при поиске / при открытии).
     document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
         btn.addEventListener('click', () => {
             const board = btn.dataset.board;
             const bs = state.boardStatus[board] || {};
-
-            if (!bs.hasToken && bs.hasAuthModule) {
-                // Нет токена, но есть auth-модуль → логин
-                loginBoard(board);
-            } else if (!bs.hasToken && !bs.hasAuthModule) {
-                // Нет токена, нет auth-модуля → подсказка открыть вкладку
-                showToast(`Open ${board.toUpperCase()} in a browser tab to connect`, 'error');
-            } else {
-                // Есть токен → toggle enable/disable
-                const currentlyDisabled = !!bs.disabled;
-                toggleBoard(board, currentlyDisabled);
-            }
-        });
-
-        // Правый клик — отключить борд (удалить токен)
-        btn.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            const board = btn.dataset.board;
-            const bs = state.boardStatus[board] || {};
-            if (bs.hasToken) {
-                disconnectBoard(board);
-            }
+            const currentlyDisabled = !!bs.disabled;
+            toggleBoard(board, currentlyDisabled); // toggle: disabled → enable, enabled → disable
         });
     });
 }
@@ -915,7 +894,10 @@ function updateAgentStatus() {
 // Status Bar
 // ============================================================
 
-/** Обновить кнопки-индикаторы бордов по state.boardStatus. */
+/** Обновить кнопки-индикаторы бордов по state.boardStatus.
+ *  Только два состояния: 🟢 connected (работает) или 🔴 off (всё остальное).
+ *  Вся авторизация — автоматическая, кнопка = только toggle вкл/выкл.
+ */
 function updateBoardDots() {
     const boards = ['dat', 'truckstop', 'tp'];
     for (const board of boards) {
@@ -924,30 +906,18 @@ function updateBoardDots() {
         const bs = state.boardStatus[board];
         const isOldFormat = typeof bs === 'boolean' || bs === undefined;
         const connected = isOldFormat ? !!bs : !!bs?.connected;
-        const hasToken = isOldFormat ? !!bs : !!bs?.hasToken;
         const disabled = isOldFormat ? false : !!bs?.disabled;
-        const hasAuthModule = isOldFormat ? false : !!bs?.hasAuthModule;
-        const status = bs?.status || (connected ? 'connected' : 'disconnected');
 
-        btn.classList.remove('connected', 'has-token', 'disabled', 'expired', 'no-token');
-        if (disabled) {
-            btn.classList.add('disabled');
-            btn.title = `${board.toUpperCase()} — disabled (click to enable)`;
-        } else if (connected) {
+        btn.classList.remove('connected', 'has-token', 'disabled', 'expired', 'no-token', 'logging-in');
+
+        if (!disabled && connected) {
             btn.classList.add('connected');
-            btn.title = `${board.toUpperCase()} — connected (click to toggle, right-click to disconnect)`;
-        } else if (status === 'expired') {
-            btn.classList.add('expired');
-            btn.title = `${board.toUpperCase()} — session expired (click to re-login)`;
-        } else if (hasToken) {
-            btn.classList.add('has-token');
-            btn.title = `${board.toUpperCase()} — token present (click to toggle, right-click to disconnect)`;
-        } else if (hasAuthModule) {
-            btn.classList.add('no-token');
-            btn.title = `${board.toUpperCase()} — not connected (click to login)`;
+            btn.title = `${board.toUpperCase()} — ON (click to disable)`;
         } else {
-            btn.classList.add('no-token');
-            btn.title = `${board.toUpperCase()} — not connected (open board tab to connect)`;
+            btn.classList.add('disabled');
+            btn.title = disabled
+                ? `${board.toUpperCase()} — OFF (click to enable)`
+                : `${board.toUpperCase()} — not connected`;
         }
     }
 }
