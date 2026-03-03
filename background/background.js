@@ -328,7 +328,10 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
 
 async function handleTruckstopSearchResponse(rawResults) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
-    console.log('[AIDA/Core] Truckstop raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
+    console.log(`[AIDA/Core] TS INTERCEPT — ${rawResults.length} raw cards`);
+    for (let i = 0; i < Math.min(3, rawResults.length); i++) {
+        console.log(`[AIDA/Core] TS card[${i}]:`, JSON.stringify(rawResults[i]));
+    }
     const loads = normalizeTruckstopResults(rawResults);
     if (loads.length === 0) return;
     const existing = await Storage.getLoads();
