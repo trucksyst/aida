@@ -72,24 +72,9 @@ async function init() {
     document.getElementById('date-to').value = in3days;
 
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
-    let hasSearchParams = false;
     if (resp?.settings?.lastSearch) {
         applyLastSearch(resp.settings.lastSearch);
-        hasSearchParams = !!(resp.settings.lastSearch.origin?.city || resp.settings.lastSearch.origin?.state);
         console.log('[AIDA/UI] Step: applied last search (origin, destination, dates, etc.)');
-    }
-
-    // Если нет lastSearch — попробуем взять город компании из настроек как дефолт
-    if (!hasSearchParams) {
-        const user = resp?.settings?.user || {};
-        const companyCity = user.city || user.companyCity || '';
-        const companyState = user.state || user.companyState || '';
-        if (companyCity || companyState) {
-            setVal('origin-city', companyCity);
-            setVal('origin-state', (companyState || '').toUpperCase().slice(0, 2));
-            hasSearchParams = true;
-            console.log('[AIDA/UI] Step: using company location as default:', companyCity, companyState);
-        }
     }
 
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
@@ -103,12 +88,7 @@ async function init() {
     console.log('[AIDA/UI] Step: init done. Listening for DATA_UPDATED from Core.');
 
     // ---- AUTO-SEARCH при открытии ----
-    // Если есть параметры поиска (lastSearch или defaults) → запускаем поиск автоматически
-    if (hasSearchParams) {
-        console.log('[AIDA/UI] Step: auto-search on init');
-        // Небольшая задержка чтобы UI успел отрисоваться
-        setTimeout(() => doSearch(), 300);
-    }
+    ensureSearchParamsAndSearch();
 }
 
 function applySettings(settings) {
@@ -380,11 +360,20 @@ function bindEvents() {
     });
 
     // Board toggle buttons — простой ВКЛ/ВЫКЛ.
-    // Клик = flip состояния. При выключении — грузы борда удаляются.
+    // При ВЫКЛЮЧЕНИИ — грузы борда удаляются.
+    // При ВКЛЮЧЕНИИ — авто-поиск с лучшими доступными параметрами.
     document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const board = btn.dataset.board;
-            sendToCore('TOGGLE_BOARD', { board });
+            const bs = state.boardStatus[board] || {};
+            const wasDisabled = !!bs.disabled;
+
+            await sendToCore('TOGGLE_BOARD', { board });
+
+            // Если ВКЛЮЧИЛИ (было OFF → стало ON) → авто-поиск
+            if (wasDisabled) {
+                ensureSearchParamsAndSearch();
+            }
         });
     });
 }
@@ -416,6 +405,55 @@ function switchSection(section) {
 // ============================================================
 // Search
 // ============================================================
+
+/**
+ * Заполнить форму поиска если пустая, затем запустить поиск.
+ * Приоритет: lastSearch → company city → Chicago, IL.
+ * Даты: сегодня. Equipment: Van.
+ */
+function ensureSearchParamsAndSearch() {
+    const originCity = (document.getElementById('origin-city')?.value || '').trim();
+    const originState = (document.getElementById('origin-state')?.value || '').trim();
+
+    // Если форма уже заполнена — просто поиск
+    if (originCity || originState) {
+        setTimeout(() => doSearch(), 300);
+        return;
+    }
+
+    // Пробуем lastSearch
+    const ls = state.settings?.lastSearch;
+    if (ls?.origin?.city || ls?.origin?.state) {
+        applyLastSearch(ls);
+        setTimeout(() => doSearch(), 300);
+        return;
+    }
+
+    // Пробуем company city
+    const user = state.settings?.user || {};
+    const compCity = user.city || user.companyCity || '';
+    const compState = user.state || user.companyState || '';
+    if (compCity || compState) {
+        setVal('origin-city', compCity);
+        setVal('origin-state', (compState || '').toUpperCase().slice(0, 2));
+    } else {
+        // Дефолт: Chicago, IL
+        setVal('origin-city', 'Chicago');
+        setVal('origin-state', 'IL');
+    }
+
+    // Даты: сегодня
+    const today = new Date().toISOString().split('T')[0];
+    setVal('date-from', today);
+    setVal('date-to', today);
+
+    // Equipment: Van
+    const eqEl = document.getElementById('equipment');
+    if (eqEl) eqEl.value = 'Van';
+
+    setTimeout(() => doSearch(), 300);
+}
+
 
 async function doSearch() {
     const params = getSearchParams();
