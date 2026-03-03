@@ -301,6 +301,13 @@ const TruckerpathAdapter = {
         if (template && template.url) {
             await rateLimit();
 
+            // Принудительно заменяем coyote/chr URL на основной (coyote и chr возвращают пустой ответ)
+            let fetchUrl = template.url;
+            if (fetchUrl.includes('/coyote/search/filter/') || fetchUrl.includes('/chr/search/filter/')) {
+                fetchUrl = fetchUrl.replace('/coyote/search/filter/', '/search/filter/').replace('/chr/search/filter/', '/search/filter/');
+                console.log('[AIDA/TruckerPath] URL fixed: coyote/chr → main:', fetchUrl);
+            }
+
             // Геокодируем origin/destination → координаты для TP API
             const enrichedParams = { ...params };
             if (params.origin && (params.origin.city || params.origin.state)) {
@@ -321,6 +328,7 @@ const TruckerpathAdapter = {
             }
 
             let body = typeof template.body === 'string' ? template.body : JSON.stringify(template.body);
+            console.log('[AIDA/TruckerPath] BUILD 0.1.26 body patch start, body type:', typeof template.body, 'len:', body?.length, 'has _originGeo:', !!enrichedParams._originGeo);
 
             // Прямая замена координат и адреса в body строке (regex, гарантированно работает)
             if (enrichedParams._originGeo) {
@@ -354,10 +362,10 @@ const TruckerpathAdapter = {
             }
 
             try {
-                console.log('[AIDA/TruckerPath] Step: fetch', template.url, 'method:', template.method || 'POST');
+                console.log('[AIDA/TruckerPath] Step: fetch', fetchUrl, 'method:', template.method || 'POST');
                 const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
                 console.log('[AIDA/TruckerPath] Step: request body preview:', bodyStr?.slice(0, 500));
-                const resp = await fetch(template.url, {
+                const resp = await fetch(fetchUrl, {
                     method: template.method || 'POST',
                     headers,
                     credentials: 'include',
