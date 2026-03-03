@@ -305,7 +305,10 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
         console.warn('[AIDA/Core] handleDatSearchResponse: empty or not array');
         return;
     }
-    console.log('[AIDA/Core] DAT raw load card — open in console, choose fields (e.g. comments):', rawResults[0]);
+    console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} raw cards`);
+    for (let i = 0; i < Math.min(3, rawResults.length); i++) {
+        console.log(`[AIDA/Core] DAT card[${i}]:`, JSON.stringify(rawResults[i]));
+    }
     const loads = normalizeDatResults(rawResults);
     if (loads.length === 0) {
         console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
