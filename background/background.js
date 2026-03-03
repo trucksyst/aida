@@ -545,7 +545,7 @@ async function searchLoads(params) {
     } else if (tsRaw?.error) {
         console.warn('[AIDA/Core] Truckstop adapter returned error:', tsRaw.error);
         adapterWarnings.push('Truckstop: ' + (tsRaw.error.message || tsRaw.error));
-        if (tsRaw.error.code === 'AUTH_REQUIRED') {
+        if (tsRaw.error.code === 'AUTH_REQUIRED' || tsRaw.error.code === 'NO_TEMPLATE' || tsRaw.error.code === 'WRONG_TEMPLATE') {
             authErrors.push({ board: 'truckstop', error: tsRaw.error });
         }
     }
@@ -558,7 +558,7 @@ async function searchLoads(params) {
     } else if (tpRaw?.error) {
         console.warn('[AIDA/Core] TruckerPath adapter returned error:', tpRaw.error);
         adapterWarnings.push('TruckerPath: ' + (tpRaw.error.message || tpRaw.error));
-        if (tpRaw.error.code === 'AUTH_REQUIRED') {
+        if (tpRaw.error.code === 'AUTH_REQUIRED' || tpRaw.error.code === 'NO_TEMPLATE' || tpRaw.error.code === 'WRONG_TEMPLATE') {
             authErrors.push({ board: 'tp', error: tpRaw.error });
         }
     }

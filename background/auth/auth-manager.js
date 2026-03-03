@@ -151,16 +151,26 @@ const AuthManager = {
     },
 
     /**
+     * URL-ы бордов для fallback popup (борды без auth-модуля).
+     * Юзер залогинится на сайте → харвестер поймает токен/шаблон → popup закроется.
+     */
+    _boardUrls: {
+        dat: 'https://one.dat.com/search-loads',
+        truckstop: 'https://main.truckstop.com/find-loads',
+        tp: 'https://fleet.truckerpath.com/loads'
+    },
+
+    /**
      * Автоматическое разрешение auth-ошибок от адаптеров.
-     * Вызывается из searchLoads() когда адаптеры вернули AUTH_REQUIRED.
+     * Вызывается из searchLoads() когда адаптеры вернули AUTH_REQUIRED или NO_TEMPLATE.
      *
      * Очередь popup'ов: DAT → Truckstop → TP (один за другим).
      * Для каждого борда:
      *   1. Сначала silent refresh (если есть auth-модуль) — без участия юзера
-     *   2. Если не помогло → popup login (юзер кликает "LOG IN ANYWAY")
-     *   3. Борды без auth-модуля — только popup (one.dat.com / truckstop.com)
+     *   2. Если не помогло → popup login (auth-модуль или fallback к сайту борда)
+     *   3. Для fallback → открыть сайт борда, ждать харвестер
      *
-     * @param {Array<{board: string, error: object}>} authErrors — борды с AUTH_REQUIRED
+     * @param {Array<{board: string, error: object}>} authErrors — борды с AUTH_REQUIRED/NO_TEMPLATE
      * @returns {Promise<{resolved: string[], failed: string[]}>}
      */
     async autoResolveAuthErrors(authErrors) {
@@ -175,8 +185,8 @@ const AuthManager = {
         const resolved = [];
         const failed = [];
 
-        for (const { board } of sorted) {
-            console.log(`[AIDA/Auth] Auto-resolving auth for: ${board}`);
+        for (const { board, error } of sorted) {
+            console.log(`[AIDA/Auth] Auto-resolving auth for: ${board} (${error?.code})`);
             const module = AUTH_MODULES[board];
 
             // Шаг 1: silent refresh (если есть auth-модуль)
@@ -191,7 +201,7 @@ const AuthManager = {
                 console.log(`[AIDA/Auth] Silent refresh failed for ${board}: ${refreshResult.reason}`);
             }
 
-            // Шаг 2: popup login (если есть auth-модуль)
+            // Шаг 2: popup login через auth-модуль
             if (module) {
                 try {
                     console.log(`[AIDA/Auth] Opening popup login for ${board}...`);
@@ -205,14 +215,121 @@ const AuthManager = {
                 } catch (e) {
                     console.warn(`[AIDA/Auth] Popup login error for ${board}:`, e.message);
                 }
+                failed.push(board);
+                continue;
             }
 
-            // Не удалось авторизовать
+            // Шаг 3: FALLBACK — нет auth-модуля → открыть сайт борда в popup
+            // Юзер логинится на сайте → харвестер ловит токен/шаблон → popup закрывается
+            const boardUrl = this._boardUrls[board];
+            if (boardUrl) {
+                console.log(`[AIDA/Auth] Fallback: opening ${board} website for login...`);
+                try {
+                    const ok = await this._openFallbackPopup(board, boardUrl);
+                    if (ok) {
+                        console.log(`[AIDA/Auth] Fallback popup OK for ${board}`);
+                        resolved.push(board);
+                        continue;
+                    }
+                } catch (e) {
+                    console.warn(`[AIDA/Auth] Fallback popup error for ${board}:`, e.message);
+                }
+            }
+
             failed.push(board);
-            console.warn(`[AIDA/Auth] Auth failed for ${board} — no module or user cancelled`);
+            console.warn(`[AIDA/Auth] Auth failed for ${board}`);
         }
 
         return { resolved, failed };
+    },
+
+    /**
+     * Открыть fallback popup для борда без auth-модуля.
+     * Ждёт пока харвестер пришлёт TOKEN_HARVESTED для этого борда,
+     * или пока юзер закроет popup вручную.
+     * Таймаут: 2 минуты.
+     */
+    _openFallbackPopup(board, url) {
+        return new Promise((resolve) => {
+            chrome.windows.create({
+                url,
+                type: 'popup',
+                width: 1100,
+                height: 750,
+                focused: true
+            }, (win) => {
+                if (!win) {
+                    resolve(false);
+                    return;
+                }
+
+                const popupWindowId = win.id;
+                let done = false;
+
+                const timeout = setTimeout(() => {
+                    if (!done) {
+                        done = true;
+                        cleanup();
+                        chrome.windows.remove(popupWindowId).catch(() => { });
+                        resolve(false);
+                    }
+                }, 120000); // 2 минуты
+
+                // Слушаем TOKEN_HARVESTED от харвестера
+                const onMessage = (message) => {
+                    if (done) return;
+                    if (message.type === 'TOKEN_HARVESTED' && message.board === board) {
+                        done = true;
+                        clearTimeout(timeout);
+                        cleanup();
+                        // Даём харвестеру 1 сек записать токен, потом закрываем
+                        setTimeout(() => {
+                            chrome.windows.remove(popupWindowId).catch(() => { });
+                        }, 1000);
+                        resolve(true);
+                    }
+                    // Для TruckerPath — слушаем TP_SEARCH_REQUEST_CAPTURED
+                    if (board === 'tp' && message.type === 'TP_SEARCH_REQUEST_CAPTURED') {
+                        done = true;
+                        clearTimeout(timeout);
+                        cleanup();
+                        setTimeout(() => {
+                            chrome.windows.remove(popupWindowId).catch(() => { });
+                        }, 1000);
+                        resolve(true);
+                    }
+                    // Для Truckstop — слушаем TS_SEARCH_REQUEST_CAPTURED
+                    if (board === 'truckstop' && message.type === 'TS_SEARCH_REQUEST_CAPTURED') {
+                        done = true;
+                        clearTimeout(timeout);
+                        cleanup();
+                        setTimeout(() => {
+                            chrome.windows.remove(popupWindowId).catch(() => { });
+                        }, 1000);
+                        resolve(true);
+                    }
+                };
+
+                // Если popup закрыт юзером
+                const onRemoved = (windowId) => {
+                    if (windowId !== popupWindowId) return;
+                    if (!done) {
+                        done = true;
+                        clearTimeout(timeout);
+                        cleanup();
+                        resolve(false);
+                    }
+                };
+
+                const cleanup = () => {
+                    chrome.runtime.onMessage.removeListener(onMessage);
+                    chrome.windows.onRemoved.removeListener(onRemoved);
+                };
+
+                chrome.runtime.onMessage.addListener(onMessage);
+                chrome.windows.onRemoved.addListener(onRemoved);
+            });
+        });
     }
 };
 
