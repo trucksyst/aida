@@ -642,7 +642,7 @@ function renderDetailContent(load) {
         ${detailRow('Full/Partial', load.fullPartial || '—')}
         ${detailRow('Pickup date', load.pickupDate || '—')}
         ${detailRow('Board', (load.board || '').toUpperCase())}
-        ${detailRow('Notes', (load.notes && load.notes.trim()) ? esc(load.notes.trim()) : '—')}
+        ${detailRow('Notes', (load.notes && load.notes.trim()) ? esc(load.notes.trim()).replace(/\n/g, '<br>') : '—')}
     </div>
 
     <div class="detail-section">
