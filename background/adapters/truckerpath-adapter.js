@@ -187,7 +187,7 @@ function mapRowToLoad(row, idx, params) {
     const brokerName = brokerObj.company || brokerObj.contact_name || brokerObj.contact_person || brokerObj.name || '';
     const phoneVal = brokerObj.phone;
     const brokerPhone = (phoneVal && typeof phoneVal === 'object' && phoneVal.number) ? String(phoneVal.number) : (typeof phoneVal === 'string' ? phoneVal : brokerObj.contact_phone || '');
-    const comments = (typeof row.description === 'string' && row.description.trim()) ? row.description.trim() : (typeof row[RAW_FIELD_COMMENTS] === 'string' ? row[RAW_FIELD_COMMENTS].trim() : '');
+    const comments = typeof row[RAW_FIELD_COMMENTS] === 'string' ? row[RAW_FIELD_COMMENTS].trim() : '';
 
     return {
         id: `tp_${btoa(unescape(encodeURIComponent(idSeed))).replace(/[+/=]/g, '').slice(0, 16)}`,
