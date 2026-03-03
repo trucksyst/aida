@@ -356,13 +356,35 @@ function bindEvents() {
         toggleAgent(e.target.checked);
     });
 
-    // Board toggle buttons
+    // Board toggle buttons — двойная логика:
+    //   Нет токена + есть auth-модуль → открыть логин
+    //   Есть токен → включить/выключить борд
     document.querySelectorAll('.board-toggle[data-board]').forEach(btn => {
         btn.addEventListener('click', () => {
             const board = btn.dataset.board;
             const bs = state.boardStatus[board] || {};
-            const currentlyDisabled = !!bs.disabled;
-            toggleBoard(board, currentlyDisabled); // toggle: если disabled → enable, и наоборот
+
+            if (!bs.hasToken && bs.hasAuthModule) {
+                // Нет токена, но есть auth-модуль → логин
+                loginBoard(board);
+            } else if (!bs.hasToken && !bs.hasAuthModule) {
+                // Нет токена, нет auth-модуля → подсказка открыть вкладку
+                showToast(`Open ${board.toUpperCase()} in a browser tab to connect`, 'error');
+            } else {
+                // Есть токен → toggle enable/disable
+                const currentlyDisabled = !!bs.disabled;
+                toggleBoard(board, currentlyDisabled);
+            }
+        });
+
+        // Правый клик — отключить борд (удалить токен)
+        btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const board = btn.dataset.board;
+            const bs = state.boardStatus[board] || {};
+            if (bs.hasToken) {
+                disconnectBoard(board);
+            }
         });
     });
 }
@@ -432,7 +454,7 @@ async function doSearch() {
                 const bs = state.boardStatus || {};
                 const anyConnected = Object.values(bs).some(b => typeof b === 'object' ? b.connected : !!b);
                 if (!anyConnected) {
-                    showToast('No board connected. Open one.dat.com in another tab, sign in and search there, then try here again.', 'error');
+                    showToast('No board connected. Click a board button below to log in.', 'error');
                 } else {
                     showToast('No loads found for this search.', 'error');
                 }
@@ -476,7 +498,7 @@ function getEmptyMessage() {
     const bs = state.boardStatus || {};
     const anyConnected = Object.values(bs).some(b => typeof b === 'object' ? b.connected : !!b);
     if (!anyConnected) {
-        return 'Connect a board first: Open one.dat.com in another tab, sign in, and run a search there. AIDA will capture the connection. Then return here and click Search.';
+        return 'Connect a board first: click a board button below (DAT, Truckstop, TruckerPath) to log in.';
     }
     return 'No loads found. Enter search params and click Search, or try different filters.';
 }
@@ -900,31 +922,73 @@ function updateBoardDots() {
         const btn = document.getElementById(`board-btn-${board}`);
         if (!btn) continue;
         const bs = state.boardStatus[board];
-        // boardStatus может быть старый формат (boolean) или новый ({connected, hasToken, tabOpen, disabled})
         const isOldFormat = typeof bs === 'boolean' || bs === undefined;
         const connected = isOldFormat ? !!bs : !!bs?.connected;
         const hasToken = isOldFormat ? !!bs : !!bs?.hasToken;
         const disabled = isOldFormat ? false : !!bs?.disabled;
+        const hasAuthModule = isOldFormat ? false : !!bs?.hasAuthModule;
+        const status = bs?.status || (connected ? 'connected' : 'disconnected');
 
-        btn.classList.remove('connected', 'has-token', 'disabled');
+        btn.classList.remove('connected', 'has-token', 'disabled', 'expired', 'no-token');
         if (disabled) {
             btn.classList.add('disabled');
-            btn.title = `${board.toUpperCase()} — отключён (клик для включения)`;
+            btn.title = `${board.toUpperCase()} — disabled (click to enable)`;
         } else if (connected) {
             btn.classList.add('connected');
-            btn.title = `${board.toUpperCase()} — подключён (клик для отключения)`;
+            btn.title = `${board.toUpperCase()} — connected (click to toggle, right-click to disconnect)`;
+        } else if (status === 'expired') {
+            btn.classList.add('expired');
+            btn.title = `${board.toUpperCase()} — session expired (click to re-login)`;
         } else if (hasToken) {
             btn.classList.add('has-token');
-            btn.title = `${board.toUpperCase()} — токен есть, вкладка закрыта (клик для отключения)`;
+            btn.title = `${board.toUpperCase()} — token present (click to toggle, right-click to disconnect)`;
+        } else if (hasAuthModule) {
+            btn.classList.add('no-token');
+            btn.title = `${board.toUpperCase()} — not connected (click to login)`;
         } else {
-            btn.title = `${board.toUpperCase()} — не подключён (откройте вкладку борда)`;
+            btn.classList.add('no-token');
+            btn.title = `${board.toUpperCase()} — not connected (open board tab to connect)`;
         }
     }
 }
 
 async function toggleBoard(board, enable) {
     await sendToCore('TOGGLE_BOARD', { board, enabled: enable });
-    // Состояние обновится через DATA_UPDATED push
+}
+
+async function loginBoard(board) {
+    const btn = document.getElementById(`board-btn-${board}`);
+    if (btn) {
+        btn.classList.add('logging-in');
+        btn.querySelector('.board-label').textContent = 'Logging in...';
+    }
+    showToast(`Opening ${board.toUpperCase()} login...`);
+
+    try {
+        const resp = await sendToCore('LOGIN_BOARD', { board });
+        if (resp?.ok) {
+            showToast(`${board.toUpperCase()} connected!`);
+        } else {
+            showToast(resp?.error || `${board.toUpperCase()} login failed`, 'error');
+        }
+    } catch (e) {
+        showToast(`Login error: ${e.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.classList.remove('logging-in');
+            // Восстановим label — updateBoardDots обновит статус
+            const labels = { dat: 'DAT', truckstop: 'Truckstop', tp: 'TruckerPath' };
+            btn.querySelector('.board-label').textContent = labels[board] || board;
+        }
+    }
+}
+
+async function disconnectBoard(board) {
+    const labels = { dat: 'DAT', truckstop: 'Truckstop', tp: 'TruckerPath' };
+    const resp = await sendToCore('DISCONNECT_BOARD', { board });
+    if (resp?.ok || resp?.error === undefined) {
+        showToast(`${labels[board] || board} disconnected`);
+    }
 }
 
 // ============================================================

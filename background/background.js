@@ -24,6 +24,7 @@ import Retell from './retell.js';
 import DatAdapter, { normalizeDatResults } from './adapters/dat-adapter.js';
 import TruckstopAdapter, { normalizeTruckstopResults } from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truckerpath-adapter.js';
+import AuthManager from './auth/auth-manager.js';
 
 // ============================================================
 // Открытие UI в полноэкранной вкладке (не Side Panel)
@@ -65,11 +66,15 @@ async function isBoardTabOpen(board) {
 /** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (по токенам + вкладкам). */
 async function getSettingsForUI() {
     const settings = await Storage.getSettings();
-    const datToken = await Storage.getToken('dat');
-    const tsToken = await Storage.getToken('truckstop');
     const tpConnected = !!settings?.truckerpathRequestTemplate;
 
-    // Реальная проверка: токен есть И вкладка открыта
+    // Статусы через AuthManager (для DAT — с авто-refresh)
+    const [datStatus, tsStatus] = await Promise.all([
+        AuthManager.getStatus('dat'),
+        AuthManager.getStatus('truckstop')
+    ]);
+
+    // Вкладки бордов — опциональная доп. информация (не обязательны для connected)
     const [datTabOpen, tsTabOpen, tpTabOpen] = await Promise.all([
         isBoardTabOpen('dat'),
         isBoardTabOpen('truckstop'),
@@ -81,9 +86,30 @@ async function getSettingsForUI() {
     return {
         ...settings,
         boardStatus: {
-            dat: { connected: !!datToken && datTabOpen, hasToken: !!datToken, tabOpen: datTabOpen, disabled: !!disabledBoards.dat },
-            truckstop: { connected: !!tsToken && tsTabOpen, hasToken: !!tsToken, tabOpen: tsTabOpen, disabled: !!disabledBoards.truckstop },
-            tp: { connected: tpConnected && tpTabOpen, hasToken: tpConnected, tabOpen: tpTabOpen, disabled: !!disabledBoards.tp }
+            dat: {
+                connected: datStatus === 'connected',
+                status: datStatus,
+                hasToken: datStatus !== 'disconnected',
+                tabOpen: datTabOpen,
+                hasAuthModule: true,
+                disabled: !!disabledBoards.dat
+            },
+            truckstop: {
+                connected: tsStatus === 'connected',
+                status: tsStatus,
+                hasToken: tsStatus !== 'disconnected',
+                tabOpen: tsTabOpen,
+                hasAuthModule: false,
+                disabled: !!disabledBoards.truckstop
+            },
+            tp: {
+                connected: tpConnected,
+                status: tpConnected ? 'connected' : 'disconnected',
+                hasToken: tpConnected,
+                tabOpen: tpTabOpen,
+                hasAuthModule: false,
+                disabled: !!disabledBoards.tp
+            }
         }
     };
 }
@@ -283,6 +309,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             return true;
 
+        // ----- Auth (новый блок) -----
+        case 'LOGIN_BOARD': {
+            const { board } = message;
+            AuthManager.login(board).then(async (result) => {
+                if (result.ok) {
+                    await pushToUI({ settings: await getSettingsForUI() });
+                }
+                sendResponse(result);
+            }).catch(err => sendResponse({ ok: false, error: err.message }));
+            return true;
+        }
+
+        case 'DISCONNECT_BOARD': {
+            AuthManager.disconnect(message.board).then(async () => {
+                await pushToUI({ settings: await getSettingsForUI() });
+                sendResponse({ ok: true });
+            }).catch(err => sendResponse({ error: err.message }));
+            return true;
+        }
+
+        case 'GET_BOARD_AUTH_STATUS': {
+            AuthManager.getAllStatuses().then(statuses => {
+                sendResponse({ statuses });
+            });
+            return true;
+        }
+
         default:
             sendResponse({ ok: true });
     }
@@ -296,7 +349,11 @@ async function handleTokenHarvested({ board, token }) {
     if (!token) return;
     const existing = await Storage.getToken(board);
     if (existing === token) return;
+
+    // Сохраняем токен через AuthManager (с мета-данными expiry)
+    // + в Storage напрямую для обратной совместимости с адаптерами
     await Storage.setToken(board, token);
+    await AuthManager.handleHarvestedToken(board, token);
     await pushToUI({ settings: await getSettingsForUI() });
 
     if (board === 'dat') {

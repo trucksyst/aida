@@ -65,42 +65,72 @@
 - Аналогично для `Referer`
 - Удалены `sec-fetch-*` и `:authority/:method/:path/:scheme` pseudo-headers
 
-### 4. Cleanup (build 0.1.30)
-- Удалены все debug логи (BUILD, Body patched, request preview, etc.)
-- Оставлены только essential: error logs, result count
+### 5. Auth Module — Автономная авторизация бордов (build 0.1.31)
+
+#### 5.1 Анализ DAT Auth Flow
+- Проанализированы HAR-файлы логина DAT (login.dat.com, pass, cod, akc)
+- Выявлен полный Auth0 flow: email → password → MFA SMS → callback#access_token
+- Auth0 Client ID: `e9lzMXbnWNJ0D50C2haado7DiW1akwaC`
+- Redirect URI: `https://one.dat.com/callback`
+- Token lifetime: 3600 sec (1 час)
+- Обнаружен silent refresh через `prompt=none`
+
+#### 5.2 Auth модуль (новый блок `background/auth/`)
+**Файл:** `background/auth/auth-dat.js`
+- `login()` — открывает popup окно `login.dat.com` через `chrome.windows.create`
+- Перехватывает callback URL с `access_token` через `chrome.tabs.onUpdated`
+- `silentRefresh()` — обновляет токен без участия пользователя (`prompt=none`)
+- `getToken()` — возвращает актуальный токен, при необходимости запускает refresh
+- `getStatus()` — `'connected'` | `'expired'` | `'disconnected'`
+- `_saveToken()` — сохраняет токен + мета-данные (issuedAt, expiresAt, source)
+
+**Файл:** `background/auth/auth-manager.js`
+- Единая точка входа для Core: `login(board)`, `getToken(board)`, `getStatus(board)`
+- Реестр auth-модулей: `{ dat: AuthDat, truckstop: TODO, tp: TODO }`
+- Fallback для бордов без auth-модуля — прямое чтение из Storage
+- `handleHarvestedToken()` — обновляет мета-данные при перехвате токена харвестером
+
+#### 5.3 Интеграция с Core (`background.js`)
+- Добавлен `import AuthManager`
+- Новые message handlers: `LOGIN_BOARD`, `DISCONNECT_BOARD`, `GET_BOARD_AUTH_STATUS`
+- `getSettingsForUI()` — статус борда через AuthManager (не требует `tabOpen`)
+- `handleTokenHarvested()` — обновляет мета-данные через AuthManager
+
+#### 5.4 UI — двойная логика кнопок бордов (`ui/app.js`)
+- Клик на борд без токена + есть auth-модуль → `loginBoard()` → popup логин
+- Клик на борд без токена + нет auth-модуля → toast «откройте вкладку борда»
+- Клик на подключённый борд → toggle вкл/выкл (как раньше)
+- Правый клик → `disconnectBoard()` → удалить токен
+- Анимация `logging-in` на кнопке во время логина
+- Обновлённые пустые сообщения: «click a board button to log in»
+
+#### 5.5 CSS — новые состояния кнопок (`styles.css`)
+- `.board-toggle.expired` — оранжевый пульсирующий индикатор
+- `.board-toggle.no-token` — пустой серый круг (приглашение к логину)
+- `.board-toggle.logging-in` — анимация при входе
+- `@keyframes pulse-dot` — пульсация для expired/logging-in
+
+#### 5.6 Manifest
+- Добавлен `https://login.dat.com/*` в `host_permissions`
 
 ---
 
 ## Файлы изменённые в сессии:
 - `background/adapters/truckerpath-adapter.js` — основной рефакторинг
-- `background/background.js` — cooldown, комментарии, логи
+- `background/background.js` — cooldown, auth integration, комментарии, логи
+- `background/auth/auth-dat.js` — **НОВЫЙ** — авторизация DAT
+- `background/auth/auth-manager.js` — **НОВЫЙ** — менеджер авторизации
 - `background/retell.js` — broker.company
-- `ui/app.js` — build footer, zip cleanup
+- `ui/app.js` — build footer, auth кнопки, zip cleanup
+- `ui/components/styles.css` — auth состояния кнопок
 - `harvesters/harvester-truckerpath.js` — build version sync
-- `manifest.json` — version bumps
-
-## TP API формат (из HAR):
-```
-URL: POST https://api.truckerpath.com/tl/search/filter/web/v2
-Headers: x-auth-token, client: WebCarriers/0.0.0, installation-id
-Body: {
-  query: {
-    pickup: {
-      geo: {
-        location: { address, lat, lng },
-        deadhead: { max }
-      },
-      date_local: { from: "YYYY-MM-DDT00:00:00", to: "YYYY-MM-DDT23:59:59" }
-    },
-    equipment: ["flatbed"]
-  },
-  origins: ["TRUCKERPATH"]
-}
-Response: { search_id, items: [...], meta: { total } }
-```
+- `manifest.json` — version bumps, login.dat.com host permission
 
 ## TODO (для следующего чата):
 - [ ] Проверить что TP search реально возвращает грузы в UI
 - [ ] Проверить что `findLoadsInResponse` находит `items` ключ
 - [ ] Проверить нормализацию TP raw → контракт v2
 - [ ] Тестировать Van/Reefer equipment маппинг
+- [ ] Реализовать auth-truckstop.js
+- [ ] Реализовать auth-truckerpath.js
+- [ ] Тестировать silent refresh DAT (через ~50 мин после логина)
