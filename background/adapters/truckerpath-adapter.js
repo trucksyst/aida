@@ -305,7 +305,7 @@ const TruckerpathAdapter = {
             let fetchUrl = template.url;
             if (fetchUrl.includes('/coyote/search/filter/') || fetchUrl.includes('/chr/search/filter/')) {
                 fetchUrl = fetchUrl.replace('/coyote/search/filter/', '/search/filter/').replace('/chr/search/filter/', '/search/filter/');
-                console.log('[AIDA/TruckerPath] URL fixed: coyote/chr → main:', fetchUrl);
+
             }
 
             // Геокодируем origin/destination → координаты для TP API
@@ -314,7 +314,7 @@ const TruckerpathAdapter = {
                 const geo = await geocodeCity(params.origin.city, params.origin.state);
                 if (geo) {
                     enrichedParams._originGeo = geo;
-                    console.log('[AIDA/TruckerPath] Geocoded origin:', params.origin.city, params.origin.state, '→', geo.lat, geo.lon);
+
                 } else {
                     console.warn('[AIDA/TruckerPath] Failed to geocode origin:', params.origin.city, params.origin.state);
                 }
@@ -323,12 +323,12 @@ const TruckerpathAdapter = {
                 const geo = await geocodeCity(params.destination.city, params.destination.state);
                 if (geo) {
                     enrichedParams._destGeo = geo;
-                    console.log('[AIDA/TruckerPath] Geocoded dest:', params.destination.city, params.destination.state, '→', geo.lat, geo.lon);
+
                 }
             }
 
             let body = typeof template.body === 'string' ? template.body : JSON.stringify(template.body);
-            console.log('[AIDA/TruckerPath] BUILD 0.1.26 body patch start, body type:', typeof template.body, 'len:', body?.length, 'has _originGeo:', !!enrichedParams._originGeo);
+
 
             // Прямая замена координат и адреса в body строке (regex, гарантированно работает)
             if (enrichedParams._originGeo) {
@@ -336,12 +336,12 @@ const TruckerpathAdapter = {
                 // Заменяем первое вхождение "lat":число и "lng":число
                 body = body.replace(/"lat"\s*:\s*-?[\d.]+/, `"lat":${lat}`);
                 body = body.replace(/"lng"\s*:\s*-?[\d.]+/, `"lng":${lon}`);
-                console.log('[AIDA/TruckerPath] Body patched: lat→', lat, 'lng→', lon);
+
             }
             if (params.origin?.city) {
                 const addr = `${params.origin.city},${params.origin.state || ''},US`;
                 body = body.replace(/"address"\s*:\s*"[^"]*"/, `"address":"${addr}"`);
-                console.log('[AIDA/TruckerPath] Body patched: address→', addr);
+
             }
             if (params.radius != null) {
                 body = body.replace(/"max"\s*:\s*\d+/, `"max":${Number(params.radius) || 200}`);
@@ -371,9 +371,7 @@ const TruckerpathAdapter = {
             }
 
             try {
-                console.log('[AIDA/TruckerPath] Step: fetch', fetchUrl, 'method:', template.method || 'POST');
-                const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-                console.log('[AIDA/TruckerPath] Step: request body preview:', bodyStr?.slice(0, 500));
+
                 const resp = await fetch(fetchUrl, {
                     method: template.method || 'POST',
                     headers,
@@ -407,7 +405,7 @@ const TruckerpathAdapter = {
                 const rawResults = findLoadsInResponse(data);
                 if (!Array.isArray(rawResults) || rawResults.length === 0) {
                     const topKeys = data ? Object.keys(data).slice(0, 10).join(', ') : 'null';
-                    console.log(`[AIDA/TruckerPath] Step: 0 loads in response. Keys: [${topKeys}], text preview:`, text.slice(0, 300));
+
                     return { ok: true, loads: [], meta: { board: BOARD, source: 'api' } };
                 }
                 console.log('[AIDA/TruckerPath] Step: parsed', rawResults.length, 'loads from API');
@@ -462,7 +460,7 @@ function modifyTemplateBody(body, params) {
             pickupLoc.address = `${params.origin.city},${params.origin.state || ''},US`;
         }
         modified = true;
-        console.log('[AIDA/TruckerPath] Direct patch: pickup.geo.location →', pickupLoc.lat, pickupLoc.lng, pickupLoc.address);
+
     }
 
     // Deadhead (radius)
@@ -496,7 +494,7 @@ function modifyTemplateBody(body, params) {
     }
 
     if (modified) {
-        console.log('[AIDA/TruckerPath] Step: modified template body with new search params');
+
         return JSON.stringify(parsed);
     }
     return typeof body === 'string' ? body : JSON.stringify(parsed);

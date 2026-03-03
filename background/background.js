@@ -311,7 +311,7 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
     }
     console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} loads`);
     if (Date.now() < _searchCooldownUntil) {
-        console.log('[AIDA/Core] DAT INTERCEPT skipped (search cooldown)');
+
         return;
     }
     const loads = normalizeDatResults(rawResults);
@@ -335,7 +335,7 @@ async function handleTruckstopSearchResponse(rawResults) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TS INTERCEPT — ${rawResults.length} loads`);
     if (Date.now() < _searchCooldownUntil) {
-        console.log('[AIDA/Core] TS INTERCEPT skipped (search cooldown)');
+
         return;
     }
     const loads = normalizeTruckstopResults(rawResults);
@@ -350,7 +350,7 @@ async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
     console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} loads`);
     if (Date.now() < _searchCooldownUntil) {
-        console.log('[AIDA/Core] TP INTERCEPT skipped (search cooldown)');
+
         return;
     }
     let loads;
