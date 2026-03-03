@@ -298,6 +298,8 @@ const TruckerpathAdapter = {
 
             try {
                 console.log('[AIDA/TruckerPath] Step: fetch', template.url, 'method:', template.method || 'POST');
+                const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+                console.log('[AIDA/TruckerPath] Step: request body preview:', bodyStr?.slice(0, 500));
                 const resp = await fetch(template.url, {
                     method: template.method || 'POST',
                     headers,
@@ -330,7 +332,8 @@ const TruckerpathAdapter = {
                 const data = JSON.parse(text);
                 const rawResults = findLoadsInResponse(data);
                 if (!Array.isArray(rawResults) || rawResults.length === 0) {
-                    console.log('[AIDA/TruckerPath] Step: 0 loads in response');
+                    const topKeys = data ? Object.keys(data).slice(0, 10).join(', ') : 'null';
+                    console.log(`[AIDA/TruckerPath] Step: 0 loads in response. Keys: [${topKeys}], text preview:`, text.slice(0, 300));
                     return { ok: true, loads: [], meta: { board: BOARD, source: 'api' } };
                 }
                 console.log('[AIDA/TruckerPath] Step: parsed', rawResults.length, 'loads from API');
