@@ -521,6 +521,8 @@ async function searchLoads(params) {
 
     // Логируем ошибки адаптеров (не проглатываем молча)
     const adapterWarnings = [];
+    const authErrors = [];    // борды с AUTH_REQUIRED для auto-resolve
+
     const datRaw = datResult.status === 'fulfilled' ? datResult.value : {};
     if (datResult.status === 'rejected') {
         console.warn('[AIDA/Core] DAT adapter error:', datResult.reason?.message);
@@ -528,8 +530,11 @@ async function searchLoads(params) {
     } else if (datRaw?.error) {
         console.warn('[AIDA/Core] DAT adapter returned error:', datRaw.error);
         adapterWarnings.push('DAT: ' + (datRaw.error.message || datRaw.error));
+        if (datRaw.error.code === 'AUTH_REQUIRED') {
+            authErrors.push({ board: 'dat', error: datRaw.error });
+        }
     }
-    const datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
+    let datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
     const datSearchId = datRaw?.searchId || null;
     const datSseToken = datRaw?.token || null;
 
@@ -540,8 +545,11 @@ async function searchLoads(params) {
     } else if (tsRaw?.error) {
         console.warn('[AIDA/Core] Truckstop adapter returned error:', tsRaw.error);
         adapterWarnings.push('Truckstop: ' + (tsRaw.error.message || tsRaw.error));
+        if (tsRaw.error.code === 'AUTH_REQUIRED') {
+            authErrors.push({ board: 'truckstop', error: tsRaw.error });
+        }
     }
-    const tsLoads = tsRaw?.loads || (Array.isArray(tsRaw) ? tsRaw : []);
+    let tsLoads = tsRaw?.loads || (Array.isArray(tsRaw) ? tsRaw : []);
 
     const tpRaw = tpResult.status === 'fulfilled' ? tpResult.value : {};
     if (tpResult.status === 'rejected') {
@@ -550,8 +558,53 @@ async function searchLoads(params) {
     } else if (tpRaw?.error) {
         console.warn('[AIDA/Core] TruckerPath adapter returned error:', tpRaw.error);
         adapterWarnings.push('TruckerPath: ' + (tpRaw.error.message || tpRaw.error));
+        if (tpRaw.error.code === 'AUTH_REQUIRED') {
+            authErrors.push({ board: 'tp', error: tpRaw.error });
+        }
     }
-    const tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
+    let tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
+
+    // ---- AUTO-RESOLVE AUTH ERRORS ----
+    // Если есть борды с AUTH_REQUIRED → пробуем silent refresh → popup → retry
+    if (authErrors.length > 0) {
+        console.log(`[AIDA/Core] Auth errors from ${authErrors.length} board(s):`, authErrors.map(e => e.board));
+        const { resolved } = await AuthManager.autoResolveAuthErrors(authErrors);
+
+        // Retry ТОЛЬКО борды, которые удалось авторизовать
+        if (resolved.length > 0) {
+            console.log('[AIDA/Core] Re-trying boards after auth resolve:', resolved);
+
+            for (const board of resolved) {
+                try {
+                    if (board === 'dat' && !disabled.dat) {
+                        const retryResult = await DatAdapter.search(params);
+                        datLoads = retryResult?.loads || (Array.isArray(retryResult) ? retryResult : []);
+                        // Убираем warning DAT из списка (успешно авторизовались)
+                        const idx = adapterWarnings.findIndex(w => w.startsWith('DAT:'));
+                        if (idx !== -1) adapterWarnings.splice(idx, 1);
+                    }
+                    if (board === 'truckstop' && !disabled.truckstop) {
+                        const freshTsToken = await Storage.getToken('truckstop');
+                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, truckstopTemplate: tsTemplate });
+                        tsLoads = retryResult?.loads || [];
+                        const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
+                        if (idx !== -1) adapterWarnings.splice(idx, 1);
+                    }
+                    if (board === 'tp' && !disabled.tp) {
+                        const retryResult = await TruckerpathAdapter.search(params, { cachedLoads: [], template: tpTemplate });
+                        tpLoads = retryResult?.loads || [];
+                        const idx = adapterWarnings.findIndex(w => w.startsWith('TruckerPath:'));
+                        if (idx !== -1) adapterWarnings.splice(idx, 1);
+                    }
+                } catch (e) {
+                    console.warn(`[AIDA/Core] Retry ${board} after auth failed:`, e.message);
+                }
+            }
+
+            // Обновляем статусы UI после авторизации
+            await pushToUI({ settings: await getSettingsForUI() });
+        }
+    }
 
     const allLoads = [...(Array.isArray(datLoads) ? datLoads : []), ...(Array.isArray(tsLoads) ? tsLoads : []), ...(Array.isArray(tpLoads) ? tpLoads : [])];
     const loads = allLoads;

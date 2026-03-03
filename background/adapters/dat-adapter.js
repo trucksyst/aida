@@ -93,7 +93,10 @@ async function search(params) {
     const token = await Storage.getToken('dat');
     if (!token) {
         console.warn('[AIDA/DAT] No token available');
-        return [];
+        return {
+            ok: false, loads: [], meta: { board: 'dat' },
+            error: { code: 'AUTH_REQUIRED', message: 'DAT token is missing', retriable: true }
+        };
     }
 
     const origin = params.origin || {};
@@ -143,6 +146,12 @@ async function search(params) {
     if (!resp.ok) {
         const text = await resp.text();
         console.warn('[AIDA/DAT] Search failed:', resp.status, text.slice(0, 500));
+        if (resp.status === 401 || resp.status === 403) {
+            return {
+                ok: false, loads: [], meta: { board: 'dat' },
+                error: { code: 'AUTH_REQUIRED', message: `DAT auth error (${resp.status})`, retriable: true }
+            };
+        }
         if (resp.status === 400) {
             try {
                 const errJson = JSON.parse(text);
@@ -150,7 +159,7 @@ async function search(params) {
                 console.warn('[AIDA/DAT] 400 detail:', msg);
             } catch (_) { }
         }
-        return [];
+        return { ok: false, loads: [], meta: { board: 'dat' }, error: { code: 'FETCH_FAILED', message: `HTTP ${resp.status}` } };
     }
 
     let json;

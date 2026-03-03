@@ -148,6 +148,71 @@ const AuthManager = {
             // Для бордов без auth-модуля — пишем напрямую как раньше
             await chrome.storage.local.set({ [`token:${board}`]: token });
         }
+    },
+
+    /**
+     * Автоматическое разрешение auth-ошибок от адаптеров.
+     * Вызывается из searchLoads() когда адаптеры вернули AUTH_REQUIRED.
+     *
+     * Очередь popup'ов: DAT → Truckstop → TP (один за другим).
+     * Для каждого борда:
+     *   1. Сначала silent refresh (если есть auth-модуль) — без участия юзера
+     *   2. Если не помогло → popup login (юзер кликает "LOG IN ANYWAY")
+     *   3. Борды без auth-модуля — только popup (one.dat.com / truckstop.com)
+     *
+     * @param {Array<{board: string, error: object}>} authErrors — борды с AUTH_REQUIRED
+     * @returns {Promise<{resolved: string[], failed: string[]}>}
+     */
+    async autoResolveAuthErrors(authErrors) {
+        if (!authErrors || authErrors.length === 0) return { resolved: [], failed: [] };
+
+        // Приоритет: DAT → Truckstop → TP
+        const priority = ['dat', 'truckstop', 'tp'];
+        const sorted = authErrors.sort((a, b) =>
+            priority.indexOf(a.board) - priority.indexOf(b.board)
+        );
+
+        const resolved = [];
+        const failed = [];
+
+        for (const { board } of sorted) {
+            console.log(`[AIDA/Auth] Auto-resolving auth for: ${board}`);
+            const module = AUTH_MODULES[board];
+
+            // Шаг 1: silent refresh (если есть auth-модуль)
+            if (module && module.silentRefresh) {
+                console.log(`[AIDA/Auth] Trying silent refresh for ${board}...`);
+                const refreshResult = await module.silentRefresh();
+                if (refreshResult.ok) {
+                    console.log(`[AIDA/Auth] Silent refresh OK for ${board}`);
+                    resolved.push(board);
+                    continue;
+                }
+                console.log(`[AIDA/Auth] Silent refresh failed for ${board}: ${refreshResult.reason}`);
+            }
+
+            // Шаг 2: popup login (если есть auth-модуль)
+            if (module) {
+                try {
+                    console.log(`[AIDA/Auth] Opening popup login for ${board}...`);
+                    const loginResult = await module.login();
+                    if (loginResult.ok) {
+                        console.log(`[AIDA/Auth] Popup login OK for ${board}`);
+                        resolved.push(board);
+                        continue;
+                    }
+                    console.warn(`[AIDA/Auth] Popup login failed for ${board}: ${loginResult.error}`);
+                } catch (e) {
+                    console.warn(`[AIDA/Auth] Popup login error for ${board}:`, e.message);
+                }
+            }
+
+            // Не удалось авторизовать
+            failed.push(board);
+            console.warn(`[AIDA/Auth] Auth failed for ${board} — no module or user cancelled`);
+        }
+
+        return { resolved, failed };
     }
 };
 
