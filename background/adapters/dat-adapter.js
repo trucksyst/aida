@@ -116,16 +116,16 @@ async function search(params) {
         if (originPlace === 'AUTH_FAILED') {
             return {
                 ok: false, loads: [], meta: { board: 'dat' },
-                error: { code: 'AUTH_REQUIRED', message: 'DAT token expired or invalid', retriable: true }
+                error: { code: 'AUTH_REQUIRED', message: 'DAT token expired (location API 401)', retriable: true }
             };
         }
         if (!originPlace) {
             console.warn('[AIDA/DAT] No location suggestion for origin:', originLookup);
-            return { ok: false, loads: [], meta: { board: 'dat' }, error: { code: 'LOCATION_FAILED', message: 'Could not resolve origin location' } };
+            return [];
         }
     } else {
         console.warn('[AIDA/DAT] Origin city/state required for search');
-        return { ok: false, loads: [], meta: { board: 'dat' }, error: { code: 'NO_ORIGIN', message: 'Origin city/state required' } };
+        return [];
     }
     if (destLookup) {
         destPlace = await getLocationSuggestion(token, destLookup);
@@ -245,7 +245,6 @@ async function getLocationSuggestion(token, lookupTerm) {
     if (!resp.ok) {
         console.warn('[AIDA/DAT] GetLocationSuggestions HTTP', resp.status, 'for:', term);
         try { console.warn('[AIDA/DAT] GetLocationSuggestions body:', (await resp.text()).slice(0, 300)); } catch (_) { }
-        // 401/403 → сигнализируем auth ошибку
         if (resp.status === 401 || resp.status === 403) return 'AUTH_FAILED';
         return null;
     }

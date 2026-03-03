@@ -40,18 +40,23 @@ const AuthDat = {
 
     /**
      * Открыть popup-окно для логина в DAT.
-     * Возвращает Promise, который resolve'ится когда токен получен.
+     * Popup открывает one.dat.com/search-loads.
+     * Auth0 silent auth через cookies даёт токен автоматически.
+     * Если сессия usurped — DAT покажет модал "LOG IN ANYWAY".
+     * Юзер кликает → сессия активируется → popup закрывается.
+     *
+     * Popup НЕ закрывается при получении callback токена —
+     * ждёт пока страница search-loads загрузится (= usurp resolved).
      */
     login() {
         return new Promise((resolve, reject) => {
-            console.log('[AIDA/Auth/DAT] Step: opening login popup');
+            console.log('[AIDA/Auth/DAT] Step: opening login popup (one.dat.com/search-loads)');
 
-            // Открываем one.dat.com — он сам редиректит на login.dat.com
             chrome.windows.create({
-                url: DAT_AUTH_CONFIG.loginUrl,
+                url: 'https://one.dat.com/search-loads',
                 type: 'popup',
-                width: 520,
-                height: 720,
+                width: 1100,
+                height: 750,
                 focused: true
             }, (win) => {
                 if (!win) {
@@ -61,8 +66,22 @@ const AuthDat = {
 
                 const popupWindowId = win.id;
                 let resolved = false;
+                let tokenCaptured = null;
 
-                // Слушаем навигацию — ловим callback с токеном
+                // Таймаут 2 минуты
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        cleanup();
+                        chrome.windows.remove(popupWindowId).catch(() => { });
+                        if (tokenCaptured) {
+                            resolve({ ok: true, token: tokenCaptured });
+                        } else {
+                            reject(new Error('Login popup timeout'));
+                        }
+                    }
+                }, 120000);
+
                 const onUpdated = (tabId, changeInfo, tab) => {
                     if (resolved) return;
                     if (tab.windowId !== popupWindowId) return;
@@ -70,41 +89,90 @@ const AuthDat = {
 
                     const url = changeInfo.url;
 
-                    // Ловим callback URL с токеном в хеше
+                    // Ловим callback URL — сохраняем токен, но НЕ закрываем popup!
                     if (url.startsWith(DAT_AUTH_CONFIG.callbackUrl)) {
                         const token = this._extractTokenFromUrl(url);
                         if (token) {
-                            resolved = true;
-                            cleanup();
-
-                            // Сохраняем токен
+                            tokenCaptured = token;
                             this._saveToken(token, 'login').then(() => {
-                                console.log('[AIDA/Auth/DAT] Step: token obtained via login popup');
-                                // Закрываем popup
-                                chrome.windows.remove(popupWindowId).catch(() => { });
-                                resolve({ ok: true, token });
+                                console.log('[AIDA/Auth/DAT] Step: token captured from callback. Popup stays open for usurp modal.');
                             });
                         }
                     }
+
+                    // Popup загрузил search-loads → usurp пройден → закрываем
+                    if (url.includes('one.dat.com/search-loads') && changeInfo.status === 'complete') {
+                        // Даём странице 2 сек прогрузиться (модал может ещё не появиться)
+                        // Но если search-loads загрузился ПОЛНОСТЬЮ — всё ок
+                    }
                 };
 
-                // Если popup закрыт без логина
+                // Следим за полной загрузкой страницы
+                const onCompleted = (tabId, changeInfo, tab) => {
+                    if (resolved) return;
+                    if (tab.windowId !== popupWindowId) return;
+                    if (changeInfo.status !== 'complete') return;
+
+                    const url = tab.url || '';
+                    // Если search-loads загрузился и токен уже пойман → ждём 3 сек и закрываем
+                    if (url.includes('one.dat.com/search-loads') && tokenCaptured) {
+                        console.log('[AIDA/Auth/DAT] Step: search-loads loaded + token captured. Closing in 3s...');
+                        setTimeout(() => {
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeout);
+                                cleanup();
+                                chrome.windows.remove(popupWindowId).catch(() => { });
+                                resolve({ ok: true, token: tokenCaptured });
+                            }
+                        }, 3000);
+                    }
+                };
+
+                // Слушаем TOKEN_HARVESTED от харвестера (как fallback)
+                const onMessage = (message) => {
+                    if (resolved) return;
+                    if (message.type === 'TOKEN_HARVESTED' && message.board === 'dat') {
+                        tokenCaptured = message.token || tokenCaptured;
+                        console.log('[AIDA/Auth/DAT] Step: token from harvester. Closing in 2s...');
+                        setTimeout(() => {
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeout);
+                                cleanup();
+                                chrome.windows.remove(popupWindowId).catch(() => { });
+                                resolve({ ok: true, token: tokenCaptured });
+                            }
+                        }, 2000);
+                    }
+                };
+
+                // Если popup закрыт юзером
                 const onRemoved = (windowId) => {
                     if (windowId !== popupWindowId) return;
                     if (!resolved) {
                         resolved = true;
+                        clearTimeout(timeout);
                         cleanup();
-                        reject(new Error('Login popup closed without authentication'));
+                        if (tokenCaptured) {
+                            resolve({ ok: true, token: tokenCaptured });
+                        } else {
+                            reject(new Error('Login popup closed without authentication'));
+                        }
                     }
                 };
 
                 const cleanup = () => {
                     chrome.tabs.onUpdated.removeListener(onUpdated);
+                    chrome.tabs.onUpdated.removeListener(onCompleted);
                     chrome.windows.onRemoved.removeListener(onRemoved);
+                    chrome.runtime.onMessage.removeListener(onMessage);
                 };
 
                 chrome.tabs.onUpdated.addListener(onUpdated);
+                chrome.tabs.onUpdated.addListener(onCompleted);
                 chrome.windows.onRemoved.addListener(onRemoved);
+                chrome.runtime.onMessage.addListener(onMessage);
             });
         });
     },
