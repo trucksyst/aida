@@ -521,7 +521,7 @@ function getSortedLoads() {
             case 'equipment': va = a.equipment || ''; vb = b.equipment || ''; break;
             case 'origin': va = a.origin?.city || ''; vb = b.origin?.city || ''; break;
             case 'destination': va = a.destination?.city || ''; vb = b.destination?.city || ''; break;
-            case 'broker': va = a.broker?.name || ''; vb = b.broker?.name || ''; break;
+            case 'broker': va = a.broker?.company || ''; vb = b.broker?.company || ''; break;
             case 'board': va = a.board || ''; vb = b.board || ''; break;
             case 'pickupDate': va = a.pickupDate || ''; vb = b.pickupDate || ''; break;
             case 'status': va = a.status || ''; vb = b.status || ''; break;
@@ -542,7 +542,7 @@ function renderRow(load) {
     const dest = `${load.destination?.city || ''}, ${load.destination?.state || ''}`;
     const miles = load.miles ? `${load.miles.toLocaleString()}` : '—';
     const weight = load.weight ? `${(load.weight / 1000).toFixed(0)}k lbs` : '—';
-    const broker = esc(load.broker?.name || '—');
+    const broker = esc(load.broker?.company || '—');
     const dateStr = load.pickupDate ? load.pickupDate.slice(5) : '—'; // MM-DD
     const status = renderStatusBadge(load.status);
     const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
@@ -638,23 +638,26 @@ function renderDetailContent(load) {
         ${detailRow('Miles', load.miles ? `${load.miles.toLocaleString()} mi` : '—')}
         ${detailRow('Weight', load.weight ? `${load.weight.toLocaleString()} lbs` : '—')}
         ${detailRow('Length', load.length ? `${load.length} ft` : '—')}
-        ${detailRow('Load', load.fullPartial || '—')}
+        ${detailRow('Deadhead', load.deadhead ? `${Math.round(load.deadhead)} mi` : '—')}
+        ${detailRow('Full/Partial', load.fullPartial || '—')}
         ${detailRow('Pickup date', load.pickupDate || '—')}
         ${detailRow('Board', (load.board || '').toUpperCase())}
-        ${detailRow('Comments', (load.comments && load.comments.trim()) ? esc(load.comments.trim()) : '—')}
+        ${detailRow('Notes', (load.notes && load.notes.trim()) ? esc(load.notes.trim()) : '—')}
     </div>
 
     <div class="detail-section">
         <h3>Broker</h3>
-        ${detailRow('Company', load.broker?.name || '—')}
+        ${detailRow('Company', load.broker?.company || '—')}
         ${detailRow('Phone', load.broker?.phone
-        ? `<a href="tel:${load.broker.phone}" style="color:var(--accent)">${load.broker.phone}</a>`
+        ? `<a href="tel:${load.broker.phone}" style="color:var(--accent)">${load.broker.phone}${load.broker.phoneExt ? ' x' + load.broker.phoneExt : ''}</a>`
         : '—')}
         ${detailRow('Email', load.broker?.email
             ? `<a href="mailto:${load.broker.email}" style="color:var(--accent)">${load.broker.email}</a>`
             : '—')}
-        ${load.broker?.creditScore !== null && load.broker?.creditScore !== undefined
-            ? detailRow('Credit', `${load.broker.creditScore} / ${load.broker.daysToPay} days`)
+        ${load.broker?.mc ? detailRow('MC#', load.broker.mc) : ''}
+        ${load.broker?.dot ? detailRow('DOT#', load.broker.dot) : ''}
+        ${load.broker?.rating != null
+            ? detailRow('Credit', `${load.broker.rating}${load.broker.daysToPay ? ' / ' + load.broker.daysToPay + ' days' : ''}`)
             : ''}
     </div>
 
@@ -785,7 +788,7 @@ function renderHistoryCard(entry) {
             <div class="call-card-route">${esc(entry.route || '—')}</div>
             <div class="call-card-time">${timeStr}</div>
         </div>
-        <div class="call-card-broker">${esc(entry.broker?.name || '—')}</div>
+        <div class="call-card-broker">${esc(entry.broker?.company || entry.broker?.name || '—')}</div>
         <div class="call-card-meta">
             <span>${esc(entry.broker?.phone || entry.broker?.email || '')}</span>
             ${rate ? `<span>${rate}</span>` : ''}
@@ -807,7 +810,7 @@ function renderCallCard(load, context) {
             <div class="call-card-route">${esc(origin)} → ${esc(dest)}</div>
             ${savedAt ? `<div class="call-card-time">${savedAt}</div>` : ''}
         </div>
-        <div class="call-card-broker">${esc(load.broker?.name || '—')}</div>
+        <div class="call-card-broker">${esc(load.broker?.company || load.broker?.name || '—')}</div>
         <div class="call-card-meta">
             <span>${rate}</span>
             <span>${load.miles ? `${load.miles} mi` : ''}</span>

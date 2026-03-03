@@ -77,50 +77,76 @@ function str(val) {
  */
 function normalizeTruckstopRaw(raw) {
     if (!raw || typeof raw !== 'object') return null;
-    const originCity = str(raw.originCity ?? raw.origin?.city ?? raw.Origin?.City ?? '');
-    const originState = str(raw.originState ?? raw.origin?.state ?? raw.Origin?.State ?? '');
-    const originZip = str(raw.originZipCode ?? raw.origin?.zip ?? raw.originZip ?? raw.Origin?.postalCode ?? '');
-    const destCity = str(raw.destinationCity ?? raw.destination?.city ?? raw.Destination?.City ?? '');
-    const destState = str(raw.destinationState ?? raw.destination?.state ?? raw.Destination?.State ?? '');
-    const destZip = str(raw.destinationZipCode ?? raw.destination?.zip ?? raw.destinationZip ?? raw.Destination?.postalCode ?? '');
-    const r = raw.postedRate ?? raw.rate ?? raw.Rate ?? raw.allInRate ?? raw.rateAmount;
-    const m = raw.tripDistance ?? raw.miles ?? raw.Miles ?? raw.tripLength;
-    const eq = str(raw.equipmentCode ?? raw.equipmentType ?? raw.equipment ?? raw.Equipment ?? '');
-    const w = raw.dimensionsWeight ?? raw.weight ?? raw.Weight ?? raw.maxWeight;
-    const phone = str(raw.phone ?? raw.Phone ?? raw.broker?.phone ?? raw.contact?.number ?? '');
+    const originCity = str(raw.originCity ?? raw.origin?.city ?? '');
+    const originState = str(raw.originState ?? raw.origin?.state ?? '');
+    const destCity = str(raw.destinationCity ?? raw.destination?.city ?? '');
+    const destState = str(raw.destinationState ?? raw.destination?.state ?? '');
+    const r = raw.postedRate ?? raw.rate ?? raw.allInRate ?? raw.rateAmount;
+    const m = raw.tripDistance ?? raw.miles ?? raw.tripLength;
+    const eq = str(raw.equipmentCode ?? raw.equipmentType ?? raw.equipment ?? '');
+    const eqName = str(raw.equipmentName ?? '');
+    const w = raw.dimensionsWeight ?? raw.weight ?? raw.maxWeight;
+    const phone = str(raw.phone ?? raw.broker?.phone ?? raw.contact?.number ?? '');
     const name = str(raw.accountName ?? raw.brokerName ?? raw.broker?.name ?? raw.contact?.companyName ?? '');
     const email = str(raw.email ?? raw.broker?.email ?? raw.contact?.email ?? '');
 
-    const loadId = raw.id ?? raw.loadId ?? raw.LoadId ?? raw.legacyLoadId ?? raw.postingId ?? '';
+    const loadId = raw.id ?? raw.loadId ?? raw.legacyLoadId ?? raw.postingId ?? '';
     if (!loadId && !originCity && !destCity && r == null) return null;
 
     const rateNum = typeof r === 'number' ? r : (typeof r === 'string' ? parseFloat(r) : null);
     const milesNum = typeof m === 'number' ? m : (typeof m === 'string' ? parseFloat(m) : null);
     const rpm = milesNum && rateNum ? Math.round((rateNum / milesNum) * 100) / 100 : null;
 
-    const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? raw.earliestPickup ?? '');
+    const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? '');
     const pickupDate = originEarly ? originEarly.split('T')[0] : '';
-    const postedAt = str(raw.createdOn ?? raw.updatedOn ?? raw.postedAt ?? raw.PostedAt ?? '');
-    const comments = str(raw[RAW_FIELD_COMMENTS] ?? '');
+    const postedAt = str(raw.createdOn ?? raw.updatedOn ?? raw.postedAt ?? '');
+
+    // Notes: W×H + specialInfo
+    const descParts = [];
+    if (raw.dimensionsWidth && raw.dimensionsWidth > 0) descParts.push(raw.dimensionsWidth + 'W');
+    if (raw.dimensionsHeight && raw.dimensionsHeight > 0) descParts.push(raw.dimensionsHeight + 'H');
+    const specialInfo = str(raw.specialInfo ?? raw[RAW_FIELD_COMMENTS] ?? '');
+    if (specialInfo) descParts.push(specialInfo);
+    const notes = descParts.join(' x ').replace(' x ', ' | ') || '';
+
+    // Rating: experienceFactor "A"→95, "B"→80, "C"→60, "D"→40, "F"→20
+    const expFactor = str(raw.experienceFactor ?? '');
+    const ratingMap = { A: 95, B: 80, C: 60, D: 40, F: 20 };
+    const rating = ratingMap[expFactor] ?? null;
 
     return {
         id: `ts_${loadId || Math.random().toString(36).slice(2, 10)}`,
         board: BOARD,
-        origin: { city: originCity, state: originState, zip: originZip },
-        destination: { city: destCity, state: destState, zip: destZip },
+        externalId: raw.legacyLoadId ? String(raw.legacyLoadId) : String(loadId || ''),
+        origin: { city: originCity, state: originState, lat: null, lng: null },
+        destination: { city: destCity, state: destState, lat: null, lng: null },
         equipment: eq || 'Unknown',
-        equipmentCode: eq,
+        equipmentName: eqName,
+        equipmentAll: eq ? [eq] : [],
         weight: typeof w === 'number' ? w : (typeof w === 'string' ? parseFloat(w) : null),
+        length: typeof raw.dimensionsLength === 'number' && raw.dimensionsLength > 0 ? raw.dimensionsLength : null,
+        fullPartial: '',
         miles: milesNum,
+        deadhead: typeof raw.originDeadhead === 'number' ? raw.originDeadhead : null,
         rate: rateNum,
         rpm,
-        broker: { name: str(name), phone: str(phone), email: str(email) },
-        comments,
+        broker: {
+            company: name,
+            phone: phone,
+            phoneExt: '',
+            email: email,
+            mc: raw.brokerMC ? String(raw.brokerMC) : '',
+            dot: raw.dot ? String(raw.dot) : '',
+            address: '',
+            rating,
+            daysToPay: raw.daysToPayInteger ?? (typeof raw.daysToPay === 'string' ? parseInt(raw.daysToPay, 10) || null : null),
+        },
+        notes,
         pickupDate,
         postedAt,
         status: 'active',
-        statusUpdatedAt: new Date().toISOString(),
-        receivedAt: new Date().toISOString(),
+        bookNow: !!(raw.isBookItNow || raw.canBookItNow),
+        factorable: !!(raw.isCompanyFactorable),
         raw
     };
 }

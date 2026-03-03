@@ -148,7 +148,7 @@ async function search(params) {
                 const errJson = JSON.parse(text);
                 const msg = errJson?.errors?.[0]?.message || errJson?.message || text.slice(0, 200);
                 console.warn('[AIDA/DAT] 400 detail:', msg);
-            } catch (_) {}
+            } catch (_) { }
         }
         return [];
     }
@@ -229,7 +229,7 @@ async function getLocationSuggestion(token, lookupTerm) {
     });
     if (!resp.ok) {
         console.warn('[AIDA/DAT] GetLocationSuggestions HTTP', resp.status, 'for:', term);
-        try { console.warn('[AIDA/DAT] GetLocationSuggestions body:', (await resp.text()).slice(0, 300)); } catch (_) {}
+        try { console.warn('[AIDA/DAT] GetLocationSuggestions body:', (await resp.text()).slice(0, 300)); } catch (_) { }
         return null;
     }
     let json;
@@ -417,7 +417,6 @@ const RAW_FIELD_COMMENTS = 'comments';
 
 function normalize(raw) {
     if (!raw || typeof raw !== 'object') return null;
-    // Некоторые версии API возвращают объект в обёртке; допускаем плоскую структуру
     const item = raw.assetInfo ? raw : (raw.posting || raw.load || raw);
     const ai = item.assetInfo || item;
     const pi = item.posterInfo || raw.posterInfo || {};
@@ -426,61 +425,75 @@ function normalize(raw) {
     const origin = ai.origin || raw.origin || {};
     const dest = ai.destination || raw.destination || {};
     const contact = pi.contact || raw.contact || {};
-    const phone = contact?.phone && typeof contact.phone === 'object' ? contact.phone : { number: contact?.phone || (typeof raw.phone === 'string' ? raw.phone : '') };
+    const phone = contact?.phone && typeof contact.phone === 'object' ? contact.phone : { number: contact?.phone || '' };
     const credit = pi.credit || {};
     const tripLen = ai.tripLength || raw.tripLength || {};
+    const dotIds = raw.posterDotIds || item.posterDotIds || {};
+    const deadheadObj = raw.originDeadheadMiles || item.originDeadheadMiles || {};
 
-    // FindLoads возвращает rateInfo.bookable.rate.rateUsd; старый формат — bookable.rateUsd
     const rateObj = ri.bookable?.rate || (ri.bookable?.rateUsd ? ri.bookable : null) || ri.nonBookable || {};
     const rateUsd = rateObj.rateUsd ?? (typeof ri.rateUsd === 'number' ? ri.rateUsd : (typeof raw.rate === 'number' ? raw.rate : null));
     const miles = tripLen.miles ?? (typeof ai.tripLength === 'number' ? ai.tripLength : (typeof raw.miles === 'number' ? raw.miles : null));
 
     const eqCode = ai.equipmentType || raw.equipmentType || '';
-
     const originCity = origin.city || (typeof origin === 'string' ? origin : '');
     const destCity = dest.city || (typeof dest === 'string' ? dest : '');
     const postingId = ai.postingId || raw.resultId || raw.postingId || raw.id;
 
     if (!postingId && !originCity && !destCity && !rateUsd) return null;
 
+    // comments в DAT — массив строк, join через \n
+    const rawComments = raw[RAW_FIELD_COMMENTS] || item[RAW_FIELD_COMMENTS];
+    const notes = Array.isArray(rawComments) ? rawComments.join('\n').trim()
+        : (typeof rawComments === 'string' ? rawComments.trim() : '');
+
     return {
         id: `dat_${postingId || Math.random().toString(36).slice(2)}`,
         board: 'dat',
+        externalId: String(postingId || ''),
         origin: {
-            city: originCity || (origin && origin.city != null ? origin.city : ''),
-            state: origin.stateProv || (origin && origin.state != null ? origin.state : ''),
-            zip: (origin && origin.postalCode != null ? origin.postalCode : '') || (origin && origin.zip != null ? origin.zip : '')
+            city: originCity,
+            state: origin.stateProv || origin.state || '',
+            lat: origin.latitude ?? null,
+            lng: origin.longitude ?? null,
         },
         destination: {
-            city: destCity || (dest && dest.city != null ? dest.city : ''),
-            state: dest.stateProv || (dest && dest.state != null ? dest.state : ''),
-            zip: (dest && dest.postalCode != null ? dest.postalCode : '') || (dest && dest.zip != null ? dest.zip : '')
+            city: destCity,
+            state: dest.stateProv || dest.state || '',
+            lat: dest.latitude ?? null,
+            lng: dest.longitude ?? null,
         },
         equipment: EQ_NAMES[eqCode] || eqCode || 'Unknown',
-        equipmentCode: eqCode,
+        equipmentName: EQ_NAMES[eqCode] || eqCode || '',
+        equipmentAll: eqCode ? [eqCode] : [],
         weight: cap.maximumWeightPounds || null,
         length: cap.maximumLengthFeet || null,
-        fullPartial: cap.fullPartial || '',
+        fullPartial: (cap.fullPartial || '').toUpperCase(),
         miles,
+        deadhead: deadheadObj.miles ?? null,
         rate: rateUsd,
         rpm: miles && rateUsd ? Math.round((rateUsd / miles) * 100) / 100 : null,
         broker: {
-            name: pi.companyName || '',
+            company: pi.companyName || '',
             phone: phone.number || '',
+            phoneExt: phone.extension || '',
             email: contact.email || '',
-            creditScore: credit.creditScore || null,
-            daysToPay: credit.daysToPay || null
+            mc: dotIds.brokerMcNumber ? String(dotIds.brokerMcNumber) : '',
+            dot: dotIds.dotNumber ? String(dotIds.dotNumber) : '',
+            address: [pi.city, pi.state].filter(Boolean).join(', '),
+            rating: credit.creditScore ?? null,
+            daysToPay: credit.daysToPay ?? null,
         },
+        notes,
         pickupDate: (function () {
             const av = raw.availability || item.availability;
             if (!av || !av.earliestWhen) return '';
-            const s = av.earliestWhen.split ? av.earliestWhen.split('T') : [];
-            return (s && s[0]) || '';
+            return String(av.earliestWhen).split('T')[0] || '';
         })(),
-        postedAt: raw.postedAt || item.postedAt || '',
-        comments: typeof raw[RAW_FIELD_COMMENTS] === 'string' ? raw[RAW_FIELD_COMMENTS].trim() : '',
+        postedAt: raw.servicedWhen || item.servicedWhen || raw.postedAt || '',
         status: 'active',
-        statusUpdatedAt: new Date().toISOString(),
+        bookNow: !!(ri.bookable),
+        factorable: !!(raw.isFactorable || item.isFactorable),
         raw
     };
 }
@@ -672,7 +685,7 @@ function subscribeLiveQuery(searchId, token, onEvent) {
 
     if (!searchId || !token) {
         console.warn('[AIDA/DAT] SSE: missing searchId or token');
-        return { stop: () => {} };
+        return { stop: () => { } };
     }
 
     _sseSearchId = searchId;

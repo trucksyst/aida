@@ -166,47 +166,87 @@ function pickupDateFromRow(row, params) {
 
 function mapRowToLoad(row, idx, params) {
     if (!row || typeof row !== 'object') return null;
-    const age = row.age ?? row.postedAgo ?? '';
+
+    // === Origin / Destination ===
     const originStr = getOriginString(row) || (typeof row.pickupLocation === 'string' && !looksLikePlaceholder(row.pickupLocation) ? row.pickupLocation : '') || (typeof row.origin === 'string' && !looksLikePlaceholder(row.origin) ? row.origin : '');
     const destinationStr = getDestinationString(row) || (typeof row.dropoffLocation === 'string' && !looksLikePlaceholder(row.dropoffLocation) ? row.dropoffLocation : '') || (typeof row.destination === 'string' && !looksLikePlaceholder(row.destination) ? row.destination : '');
-    const miles = typeof row.distance === 'number' && Number.isFinite(row.distance) ? row.distance : (typeof row.distance_total === 'number' ? row.distance_total : parseMiles(row.miles || row.tripDistance));
-    const weight = typeof row.weight === 'number' && Number.isFinite(row.weight) ? row.weight : parseNumber(row.totalWeight);
-    const rate = parseNumber(row.price_total || row.price || row.avg_price || row.load_price || row.rate || row.postedRate);
-    const rpm = miles && rate ? Math.round((rate / miles) * 100) / 100 : null;
-    const equipRaw = row.equipment;
-    const equipmentStr = Array.isArray(equipRaw) && equipRaw.length > 0
-        ? (typeof equipRaw[0] === 'string' ? equipRaw[0] : (equipRaw[0] && equipRaw[0].name) || '')
-        : (row.trailer || row.equipmentType || params?.equipment || 'VAN');
-    const equipment = String(equipmentStr || 'VAN').trim().toUpperCase() || 'VAN';
     const origin = parseCityState(originStr);
     const destination = parseCityState(destinationStr);
-    const pickupDate = pickupDateFromRow(row, params || {});
-    const nowIso = new Date().toISOString();
-    const idSeed = (row._id || row.load_id || row.load_card_id || row.shipment_id || '') + [origin.city, origin.state, destination.city, destination.state, pickupDate, idx].join('|');
+
+    // Координаты
+    const pickupLoc = row.pickup && row.pickup.location || {};
+    const dropLoc = row.drop_off && row.drop_off.location || {};
+    origin.lat = pickupLoc.lat ?? null;
+    origin.lng = pickupLoc.lng ?? null;
+    destination.lat = dropLoc.lat ?? null;
+    destination.lng = dropLoc.lng ?? null;
+
+    // === Груз ===
+    const miles = typeof row.distance === 'number' && Number.isFinite(row.distance) ? row.distance : (typeof row.distance_total === 'number' ? row.distance_total : parseMiles(row.miles || row.tripDistance));
+    const weight = typeof row.weight === 'number' && Number.isFinite(row.weight) ? row.weight : parseNumber(row.totalWeight);
+    const rate = parseNumber(row.price_total || row.price || row.load_price || row.rate || row.postedRate);
+    const rpm = miles && rate ? Math.round((rate / miles) * 100) / 100 : null;
+    const equipRaw = row.equipment;
+    const equipmentAll = Array.isArray(equipRaw) ? equipRaw.map(e => typeof e === 'string' ? e.toUpperCase() : (e && e.name || '')).filter(Boolean) : [];
+    const equipment = equipmentAll[0] || (row.trailer || row.equipmentType || params?.equipment || 'VAN');
+    const deadhead = row.pickup && typeof row.pickup.deadhead === 'number' ? row.pickup.deadhead : null;
+
+    // === Broker ===
     const brokerObj = row.broker && typeof row.broker === 'object' ? row.broker : {};
-    const brokerName = brokerObj.company || brokerObj.contact_name || brokerObj.contact_person || brokerObj.name || '';
+    const brokerCompany = brokerObj.company || brokerObj.contact_name || brokerObj.contact_person || brokerObj.name || '';
     const phoneVal = brokerObj.phone;
     const brokerPhone = (phoneVal && typeof phoneVal === 'object' && phoneVal.number) ? String(phoneVal.number) : (typeof phoneVal === 'string' ? phoneVal : brokerObj.contact_phone || '');
-    const comments = typeof row[RAW_FIELD_COMMENTS] === 'string' ? row[RAW_FIELD_COMMENTS].trim() : '';
+    const brokerPhoneExt = (phoneVal && typeof phoneVal === 'object') ? (phoneVal.ext || '') : '';
+    const tcRating = brokerObj.transcredit_rating || {};
+
+    // === Notes: W×H + description ===
+    const descParts = [];
+    if (row.width && row.width > 0) descParts.push(row.width + 'W');
+    if (row.height && row.height > 0) descParts.push(row.height + 'H');
+    const descText = (typeof row.description === 'string' && row.description.trim()) || (typeof row[RAW_FIELD_COMMENTS] === 'string' && row[RAW_FIELD_COMMENTS].trim()) || '';
+    if (descText) descParts.push(descText);
+    const notes = descParts.join(' x ').replace(' x ', ' | ') || '';
+
+    // === Даты ===
+    const pickupDate = pickupDateFromRow(row, params || {});
+    const postedAt = typeof row.created_at === 'number' ? new Date(row.created_at > 1e12 ? row.created_at : row.created_at * 1000).toISOString() : '';
+
+    // === ID ===
+    const idSeed = (row.shipment_id || row._id || row.load_id || row.load_card_id || '') + [origin.city, origin.state, destination.city, destination.state, pickupDate, idx].join('|');
 
     return {
         id: `tp_${btoa(unescape(encodeURIComponent(idSeed))).replace(/[+/=]/g, '').slice(0, 16)}`,
         board: BOARD,
+        externalId: String(row.external_id || row.shipment_id || ''),
         origin,
         destination,
-        equipment,
-        equipmentCode: equipment,
+        equipment: String(equipment || 'VAN').trim().toUpperCase(),
+        equipmentName: '',
+        equipmentAll,
         weight,
+        length: typeof row.length === 'number' && row.length > 0 ? row.length : null,
+        fullPartial: (row.load_size || '').toUpperCase(),
         miles,
+        deadhead,
         rate,
         rpm,
-        broker: { name: brokerName, phone: brokerPhone, email: brokerObj.email || '' },
-        comments: comments || '',
+        broker: {
+            company: brokerCompany,
+            phone: brokerPhone,
+            phoneExt: brokerPhoneExt,
+            email: brokerObj.email || '',
+            mc: brokerObj.mc ? String(brokerObj.mc) : '',
+            dot: brokerObj.dot ? String(brokerObj.dot) : '',
+            address: '',
+            rating: tcRating.score ?? null,
+            daysToPay: tcRating.days_to_pay ?? null,
+        },
+        notes,
         pickupDate,
-        postedAt: (row.pickup && row.pickup.date_local) ? String(row.pickup.date_local).slice(0, 19) : (typeof row.created_at === 'number' ? new Date(row.created_at > 1e12 ? row.created_at : row.created_at * 1000).toISOString() : nowIso),
-        status: 'active',
-        statusUpdatedAt: nowIso,
-        receivedAt: nowIso,
+        postedAt,
+        status: row.expired ? 'expired' : 'active',
+        bookNow: !!(row.book_now),
+        factorable: false,
         raw: row
     };
 }
