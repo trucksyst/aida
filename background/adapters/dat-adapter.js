@@ -56,12 +56,18 @@ const EQUIPMENT_MAP = {
     'VAN': ['V'],
     'REEFER': ['R'],
     'FLATBED': ['F'],
-    'STEPDECK': ['D'],
-    'BULK': ['B'],
-    'HAZMAT': ['Z'],
-    'OTHER': ['O'],
+    'STEPDECK': ['D'],       // SD + SR + SN
+    'DOUBLEDROP': ['F'],       // DD входит в Flatbed class
+    'LOWBOY': ['F'],       // LB, LO входят в Flatbed class
+    'RGN': ['F'],       // RG входит в Flatbed class
+    'HOPPER': ['B'],       // HB входит в Bulk class
     'TANKER': ['T'],
-    'SPECIALIZED': ['S']
+    'POWERONLY': ['O'],       // PO входит в Other class
+    'CONTAINER': ['O'],       // C входит в Other class
+    'DUMP': ['F'],       // DT входит в Flatbed class
+    'AUTOCARRIER': ['O'],       // AC входит в Other class
+    'LANDOLL': ['F'],       // LA входит в Flatbed class
+    'MAXI': ['F']        // MX входит в Flatbed class
 };
 
 // ============================================================
