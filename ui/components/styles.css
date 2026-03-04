@@ -345,6 +345,8 @@ body {
     cursor: pointer;
     white-space: nowrap;
     color: var(--text-primary);
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 .equip-dropdown label:hover {
