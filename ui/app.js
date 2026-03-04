@@ -323,17 +323,15 @@ function updateEquipDisplay() {
 function initEquipMultiSelect() {
     const display = document.getElementById('equip-display');
     const dropdown = document.getElementById('equip-dropdown');
-    const applyBtn = document.getElementById('equip-apply');
 
     display.addEventListener('click', (e) => {
         e.stopPropagation();
         dropdown.classList.toggle('open');
     });
 
-    applyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        updateEquipDisplay();
-        dropdown.classList.remove('open');
+    // При каждом чекбоксе — обновить display
+    dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => updateEquipDisplay());
     });
 
     // Закрыть при клике вне
