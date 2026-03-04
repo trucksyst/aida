@@ -224,12 +224,20 @@ function attachLocationAutocomplete(cityId, dropdownId) {
         listEl.setAttribute('aria-hidden', 'true');
     }
 
+    function positionList() {
+        var rect = cityEl.getBoundingClientRect();
+        listEl.style.top = (rect.bottom + 2) + 'px';
+        listEl.style.left = rect.left + 'px';
+        listEl.style.width = rect.width + 'px';
+    }
+
     function show(items, isLoading) {
         function escapeAttr(s) {
             return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
         if (isLoading) {
             listEl.innerHTML = '<div class="location-autocomplete-item location-autocomplete-loading">Searching online…</div>';
+            positionList();
             listEl.classList.add('open');
             listEl.setAttribute('aria-hidden', 'false');
             return;
@@ -239,6 +247,7 @@ function attachLocationAutocomplete(cityId, dropdownId) {
             var label = item.label || (item.type === 'zone' ? item.value + ' (zone)' : item.value);
             return '<div class="location-autocomplete-item" data-value="' + escapeAttr(item.value) + '" data-type="' + item.type + '" role="option">' + escapeHtml(label) + '</div>';
         }).join('');
+        positionList();
         listEl.classList.add('open');
         listEl.setAttribute('aria-hidden', 'false');
         listEl.querySelectorAll('.location-autocomplete-item').forEach(function (node) {
@@ -343,7 +352,12 @@ function initEquipMultiSelect() {
 
     display.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.classList.toggle('open');
+        const isOpen = dropdown.classList.toggle('open');
+        if (isOpen) {
+            const rect = display.getBoundingClientRect();
+            dropdown.style.top = rect.bottom + 2 + 'px';
+            dropdown.style.left = rect.left + 'px';
+        }
     });
 
     // При каждом чекбоксе — обновить display
@@ -568,7 +582,13 @@ function initSearchPresets() {
     // Toggle dropdown
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdown.classList.toggle('open');
+        const isOpen = dropdown.classList.toggle('open');
+        if (isOpen) {
+            const rect = trigger.getBoundingClientRect();
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+            dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+            dropdown.style.left = 'auto';
+        }
         // Close equip dropdown if open
         document.getElementById('equip-dropdown').classList.remove('open');
     });
