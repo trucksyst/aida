@@ -207,7 +207,10 @@ const AuthManager = {
             }
 
             // Шаг 1: silent refresh (если есть auth-модуль)
-            if (module && module.silentRefresh) {
+            // НЕ пробуем silent refresh для NO_TEMPLATE — он обновляет только токен,
+            // а template захватывается только при открытии страницы Truckstop (popup login).
+            const needsTemplate = error?.code === 'NO_TEMPLATE' || error?.code === 'WRONG_TEMPLATE';
+            if (module && module.silentRefresh && !needsTemplate) {
                 console.log(`[AIDA/Auth] Trying silent refresh for ${board}...`);
                 const refreshResult = await module.silentRefresh();
                 if (refreshResult.ok) {
