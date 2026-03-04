@@ -963,7 +963,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (!tab?.url || !tab.windowId) return;
     if (!isBoardTab(tab.url)) return;
 
-    await openAidaInTab(tab.windowId);
+
 
     // Инъекция харвестера TruckerPath в MAIN world после загрузки страницы — иначе перехват не срабатывает.
     if (tab.url.startsWith(TRUCKERPATH_LOADBOARD)) {
@@ -1021,16 +1021,7 @@ async function init() {
         startPolling();
     }
 
-    // При перезагрузке расширения — сразу открыть вкладку AIDA в текущем окне
-    try {
-        const win = await chrome.windows.getCurrent();
-        if (win && win.id) {
-            await openAidaInTab(win.id);
-            console.log('[AIDA/Core] Auto-opened AIDA tab on extension load');
-        }
-    } catch (e) {
-        console.warn('[AIDA/Core] Auto-open on load failed:', e.message);
-    }
+
 }
 
 init().catch(console.error);
