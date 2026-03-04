@@ -209,16 +209,39 @@ body {
 }
 
 .search-field {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 2px;
 }
 
 .search-field label {
-    font-size: var(--font-size-xs);
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: var(--font-size-sm);
     color: var(--text-muted);
+    pointer-events: none;
+    transition: all 0.15s ease;
+    background: transparent;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+/* Float up when input is focused or has value */
+.search-field input:focus+label,
+.search-field input:not(:placeholder-shown)+label {
+    top: 0;
+    transform: translateY(-50%);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    letter-spacing: 0.3px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+}
+
+.search-field input:focus+label {
+    color: var(--accent);
 }
 
 .search-field input,
@@ -228,8 +251,8 @@ body {
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-size: var(--font-size-sm);
-    padding: 4px 8px;
-    height: 28px;
+    padding: 6px 8px 4px;
+    height: 32px;
     outline: none;
     transition: border-color var(--transition);
 }
@@ -248,7 +271,7 @@ body {
 }
 
 .search-field.field-dest input {
-    width: 140px;
+    width: 160px;
 }
 
 /* Origin/Destination autocomplete (City, ST and zones) */
@@ -369,21 +392,26 @@ body {
 }
 
 .search-field.field-date input {
-    width: 150px;
-    min-width: 150px;
+    width: 130px;
+    min-width: 130px;
     font-family: inherit;
     color-scheme: dark;
 }
 
-[data-theme="light"] .search-field.field-date input {
-    color-scheme: light;
+/* Date & equip labels are always floated (always have content) */
+.search-field.field-date label,
+.search-field.field-equip>label {
+    top: 0;
+    transform: translateY(-50%);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
 }
 
-.search-divider {
-    width: 1px;
-    height: 32px;
-    background: var(--border);
-    margin: 0 4px;
+[data-theme="light"] .search-field.field-date input {
+    color-scheme: light;
 }
 
 /* ----- Search Presets ----- */

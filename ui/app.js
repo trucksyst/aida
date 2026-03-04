@@ -587,7 +587,7 @@ function initSearchPresets() {
     });
 
     // Live preview: update display on any search field change
-    ['origin-city', 'search-radius', 'dest-city'].forEach(id => {
+    ['origin-city', 'search-radius', 'dest-city', 'dest-radius'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('input', updatePresetDisplay);
@@ -626,7 +626,7 @@ function bindEvents() {
     document.getElementById('btn-search').addEventListener('click', doSearch);
 
     // State input — Enter
-    ['origin-city', 'dest-city', 'search-radius',
+    ['origin-city', 'dest-city', 'search-radius', 'dest-radius',
         'date-from', 'date-to'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
@@ -837,6 +837,7 @@ function getSearchParams() {
             state: destParsed.state
         },
         radius: parseInt(document.getElementById('search-radius').value) || 50,
+        destRadius: parseInt(document.getElementById('dest-radius').value) || 150,
         equipment: getSelectedEquipment(),
         dateFrom: document.getElementById('date-from').value,
         dateTo: document.getElementById('date-to').value

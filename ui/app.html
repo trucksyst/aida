@@ -81,27 +81,27 @@
                     <!-- Search Panel -->
                     <div id="search-panel">
                         <div class="search-field field-origin wrap-autocomplete">
-                            <label>Origin</label>
-                            <input type="text" id="origin-city" placeholder="Chicago, IL or Z1" autocomplete="off">
+                            <input type="text" id="origin-city" placeholder=" " autocomplete="off">
+                            <label for="origin-city">Origin</label>
                             <div id="origin-autocomplete" class="location-autocomplete" role="listbox"
                                 aria-hidden="true">
                             </div>
                         </div>
                         <div class="search-field field-radius">
-                            <label>Radius</label>
-                            <input type="number" id="search-radius" placeholder="50" min="0" max="500" value="50">
+                            <input type="number" id="search-radius" placeholder=" " min="0" max="500" value="50">
+                            <label for="search-radius">Radius</label>
                         </div>
 
-                        <div class="search-divider"></div>
-
                         <div class="search-field field-dest wrap-autocomplete">
-                            <label>Destination</label>
-                            <input type="text" id="dest-city" placeholder="Dallas, TX or Z7" autocomplete="off">
+                            <input type="text" id="dest-city" placeholder=" " autocomplete="off">
+                            <label for="dest-city">Destination</label>
                             <div id="dest-autocomplete" class="location-autocomplete" role="listbox" aria-hidden="true">
                             </div>
                         </div>
-
-                        <div class="search-divider"></div>
+                        <div class="search-field field-radius">
+                            <input type="number" id="dest-radius" placeholder=" " min="0" max="500" value="150">
+                            <label for="dest-radius">Radius</label>
+                        </div>
 
                         <div class="search-field field-equip">
                             <label>Type</label>
@@ -128,12 +128,12 @@
                         </div>
 
                         <div class="search-field field-date">
-                            <label>From date</label>
-                            <input type="date" id="date-from">
+                            <input type="date" id="date-from" placeholder=" ">
+                            <label for="date-from">From</label>
                         </div>
                         <div class="search-field field-date">
-                            <label>To date</label>
-                            <input type="date" id="date-to">
+                            <input type="date" id="date-to" placeholder=" ">
+                            <label for="date-to">To</label>
                         </div>
 
                         <!-- Search Presets -->
