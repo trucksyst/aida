@@ -218,42 +218,20 @@ const AuthManager = {
             }
 
             // Шаг 2: popup login через auth-модуль
-            if (module) {
-                try {
-                    console.log(`[AIDA/Auth] Opening popup login for ${board}...`);
-                    const loginResult = await module.login();
-                    if (loginResult.ok) {
-                        console.log(`[AIDA/Auth] Popup login OK for ${board}`);
-                        resolved.push(board);
-                        continue;
-                    }
-                    console.warn(`[AIDA/Auth] Popup login failed for ${board}: ${loginResult.error}`);
-                } catch (e) {
-                    console.warn(`[AIDA/Auth] Popup login error for ${board}:`, e.message);
+            try {
+                console.log(`[AIDA/Auth] Opening popup login for ${board}...`);
+                const loginResult = await module.login();
+                if (loginResult.ok) {
+                    console.log(`[AIDA/Auth] Popup login OK for ${board}`);
+                    resolved.push(board);
+                    continue;
                 }
-                failed.push(board);
-                continue;
+                console.warn(`[AIDA/Auth] Popup login failed for ${board}: ${loginResult.error}`);
+            } catch (e) {
+                console.warn(`[AIDA/Auth] Popup login error for ${board}:`, e.message);
             }
-
-            // Шаг 3: FALLBACK — нет auth-модуля → открыть сайт борда в popup
-            // Юзер логинится на сайте → харвестер ловит токен/шаблон → popup закрывается
-            const boardUrl = this._boardUrls[board];
-            if (boardUrl) {
-                console.log(`[AIDA/Auth] Fallback: opening ${board} website for login...`);
-                try {
-                    const ok = await this._openFallbackPopup(board, boardUrl);
-                    if (ok) {
-                        console.log(`[AIDA/Auth] Fallback popup OK for ${board}`);
-                        resolved.push(board);
-                        continue;
-                    }
-                } catch (e) {
-                    console.warn(`[AIDA/Auth] Fallback popup error for ${board}:`, e.message);
-                }
-            }
-
             failed.push(board);
-            console.warn(`[AIDA/Auth] Auth failed for ${board}`);
+
         }
 
         return { resolved, failed };

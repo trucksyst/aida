@@ -1,33 +1,60 @@
 # AIDA — что сделано (контекст для передачи)
 
+## Build 0.1.36 (2026-03-03)
+
+### DAT Usurp-Aware Login
+- Popup открывает `one.dat.com/search-loads` (1100×750) вместо loginUrl
+- Auth0 silent auth через cookies даёт access_token автоматически
+- Popup **НЕ закрывается** при получении токена — даёт юзеру увидеть «LOG IN ANYWAY» модал
+- Закрывается когда: search-loads загрузился + токен пойман (3 сек), или харвестер TOKEN_HARVESTED (2 сек), или юзер закрыл, или timeout 2 мин
+- `dat-adapter.js`: `getLocationSuggestion()` возвращает `'AUTH_FAILED'` на 401/403 → `search()` возвращает `AUTH_REQUIRED`
+
+### Кнопки бордов — простой ON/OFF Toggle
+- Один клик = flip состояния (disabled ↔ enabled)
+- 🟢 зелёная = ВКЛ, 🔴 красная = ВЫКЛ (по `disabled` флагу, не по `connected`)
+- При ВЫКЛЮЧЕНИИ → удаляются все грузы этого борда из storage
+- При ВКЛЮЧЕНИИ → авто-поиск с лучшими параметрами:
+  - Приоритет: форма → `lastSearch` → company city → Chicago, IL
+  - Equipment по умолчанию: Van, dates: сегодня
+- Убрано зачёркивание (line-through) у disabled кнопок
+- Убраны мёртвые функции: `toggleBoard()`, `loginBoard()`, `disconnectBoard()`
+
+### Auto-Popup Control
+- Auto-popup **только для DAT** (есть auth-модуль с silent refresh + login)
+- Truckstop/TruckerPath: popup только при ручном клике (LOGIN_BOARD → fallback popup)
+- Disabled борды фильтруются из authErrors (двойная защита)
+- Борды без токена/шаблона не запускают адаптер (skipResult)
+
+### AIDA Auto-Open
+- Убрано авто-открытие при загрузке вкладки борда
+- Убрано авто-открытие при старте/перезагрузке расширения
+- AIDA открывается **только** при клике на иконку в тулбаре
+
+### Очистка кода
+- auth-manager.js: убран мёртвый fallback-popup код из `autoResolveAuthErrors`
+- auth-dat.js: убран пустой блок, исправлен синтаксис скобок
+- app.js: `ensureSearchParamsAndSearch()` — единая точка для авто-поиска (DRY)
+
+---
+
 ## Хранение куки и ключей
 
 - **Токены** (`token:dat`, `token:truckstop`) и **шаблоны запросов** (`settings:truckstopRequestTemplate`, `settings:truckerpathRequestTemplate`) с куками сохраняются в `chrome.storage.local`.
 - Данные **не сбрасываются** при закрытии вкладки; хранятся до следующего перехвата на вкладке борда или до переустановки расширения.
-- В `storage.js` добавлен комментарий о персистентности настроек и шаблонов.
 
-## Карточка груза: comments (описание груза)
+## Карточка груза: comments
 
-- В ТЗ в единый формат карточки добавлено поле **`comments`** (описание груза).
-- Во всех трёх адаптерах используется **одно поле** из сырой карточки — константа **`RAW_FIELD_COMMENTS`** (по умолчанию `'comments'`). Имя ключа задаётся после просмотра сырой карточки в консоли (логи `[AIDA/Core] DAT/Truckstop/TruckerPath raw load card`).
-- Переборов полей (remarks, description, commodity и т.д.) нет — только один ключ из консоли.
-- В UI в блоке Shipment строка **Comments** выводится всегда (значение или «—»).
+- Единый формат — поле **`comments`**. Один ключ `RAW_FIELD_COMMENTS` во всех адаптерах.
 
 ## TruckerPath
 
-- Харвестер: перехват `loadboard.truckerpath.com` и `api.truckerpath.com`, в т.ч. `v1/loads/load-search`, GraphQL; защита от undefined при разборе; поддержка форматов `pickup_locations`/`drop_offs_locations`, `pickup.address`/`drop_off.address`, `trip_details`, объектов с числовыми ключами.
-- Инъекция харвестера из background при загрузке вкладки TruckerPath.
-- Адаптер: маппинг из двух форматов карточек (pickup_locations/drop_offs, pickup/drop_off.address, trip_details, price_total, broker.phone.number, all_in_one_date, created_at); отсечение плейсхолдеров (axde_mcleod_origin); один ключ для comments — `RAW_FIELD_COMMENTS`.
+- Харвестер: перехват `loadboard.truckerpath.com` и `api.truckerpath.com`
+- Адаптер: маппинг из двух форматов карточек; отсечение плейсхолдеров
 
 ## Truckstop
 
-- Адаптер: шаблон + fetch из background, геокод Nominatim, нормализация; comments только из `raw[RAW_FIELD_COMMENTS]`.
+- Адаптер: шаблон + fetch из background, геокод Nominatim, нормализация
 
 ## DAT
 
-- В нормализаторе comments только из `raw[RAW_FIELD_COMMENTS]` (без fallback на item).
-
-## Очистка кода
-
-- Убраны лишние «Step»-логи в Core (оставлены логи сырой карточки для выбора полей и ошибки).
-- STATUS.md обновлён: Truckstop и TruckerPath отмечены как реализованные; добавлена заметка про персистентность и comments.
+- Нормализатор: comments только из `raw[RAW_FIELD_COMMENTS]`

@@ -99,12 +99,6 @@ const AuthDat = {
                             });
                         }
                     }
-
-                    // Popup загрузил search-loads → usurp пройден → закрываем
-                    if (url.includes('one.dat.com/search-loads') && changeInfo.status === 'complete') {
-                        // Даём странице 2 сек прогрузиться (модал может ещё не появиться)
-                        // Но если search-loads загрузился ПОЛНОСТЬЮ — всё ок
-                    }
                 };
 
                 // Следим за полной загрузкой страницы

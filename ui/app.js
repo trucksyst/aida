@@ -977,44 +977,7 @@ function updateBoardDots() {
     }
 }
 
-async function toggleBoard(board, enable) {
-    await sendToCore('TOGGLE_BOARD', { board, enabled: enable });
-}
 
-async function loginBoard(board) {
-    const btn = document.getElementById(`board-btn-${board}`);
-    if (btn) {
-        btn.classList.add('logging-in');
-        btn.querySelector('.board-label').textContent = 'Logging in...';
-    }
-    showToast(`Opening ${board.toUpperCase()} login...`);
-
-    try {
-        const resp = await sendToCore('LOGIN_BOARD', { board });
-        if (resp?.ok) {
-            showToast(`${board.toUpperCase()} connected!`);
-        } else {
-            showToast(resp?.error || `${board.toUpperCase()} login failed`, 'error');
-        }
-    } catch (e) {
-        showToast(`Login error: ${e.message}`, 'error');
-    } finally {
-        if (btn) {
-            btn.classList.remove('logging-in');
-            // Восстановим label — updateBoardDots обновит статус
-            const labels = { dat: 'DAT', truckstop: 'Truckstop', tp: 'TruckerPath' };
-            btn.querySelector('.board-label').textContent = labels[board] || board;
-        }
-    }
-}
-
-async function disconnectBoard(board) {
-    const labels = { dat: 'DAT', truckstop: 'Truckstop', tp: 'TruckerPath' };
-    const resp = await sendToCore('DISCONNECT_BOARD', { board });
-    if (resp?.ok || resp?.error === undefined) {
-        showToast(`${labels[board] || board} disconnected`);
-    }
-}
 
 // ============================================================
 // New Loads Bar — SSE уведомление о новых грузах
