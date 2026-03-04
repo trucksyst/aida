@@ -239,7 +239,9 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        if (!headers['Authorization'] && !headers['authorization']) headers['Authorization'] = `Bearer ${token}`;
+        // НЕ добавляем Authorization автоматически!
+        // Truckstop GraphQL (Hasura) аутентифицируется через cookies (credentials: include),
+        // а НЕ через Bearer token. Добавление JWT вызывает "Could not verify JWT" ошибку.
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         if (!headers['Origin']) headers['Origin'] = 'https://main.truckstop.com';
         if (!headers['Referer']) headers['Referer'] = 'https://main.truckstop.com/';
