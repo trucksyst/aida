@@ -142,16 +142,9 @@ const AuthTruckstop = {
                                     await chrome.storage.local.set({ 'token:truckstop': token });
                                     console.log('[AIDA/Auth/TS] Step: v5 token obtained and saved ✓');
 
-                                    // Даём странице загрузиться 5 сек (для захвата template харвестером)
-                                    setTimeout(() => {
-                                        if (!resolved) {
-                                            resolved = true;
-                                            clearTimeout(timeout);
-                                            cleanup();
-                                            chrome.windows.remove(popupWindowId).catch(() => { });
-                                            resolve({ ok: true, token: tokenCaptured });
-                                        }
-                                    }, 5000);
+                                    // Ждём template — Angular SPA должен загрузиться и сделать search
+                                    // Harvester захватит GraphQL запрос как TS_SEARCH_REQUEST_CAPTURED
+                                    this._waitForTemplate(popupWindowId, timeout, cleanup, resolved, tokenCaptured, resolve, () => resolved, (v) => { resolved = v; });
                                 }
                             } catch (e) {
                                 console.warn('[AIDA/Auth/TS] v5 token fetch failed:', e.message);
@@ -480,6 +473,68 @@ const AuthTruckstop = {
         } catch (e) {
             return null;
         }
+    },
+
+    /**
+     * Ждём template после получения токена.
+     * Angular SPA на main.truckstop.com загружается и делает GraphQL запрос →
+     * harvester ловит его как TS_SEARCH_REQUEST_CAPTURED → background сохраняет template.
+     * Проверяем storage каждые 2 сек, до 20 сек.
+     */
+    async _waitForTemplate(popupWindowId, timeout, cleanup, resolvedFlag, tokenCaptured, resolve, getResolved, setResolved) {
+        // Сначала проверяем — может template уже есть
+        const settings = await chrome.storage.local.get('settings');
+        const existing = settings?.settings?.truckstopRequestTemplate;
+        if (existing && existing.url) {
+            console.log('[AIDA/Auth/TS] Step: template already in storage, closing popup');
+            if (!getResolved()) {
+                setResolved(true);
+                clearTimeout(timeout);
+                cleanup();
+                chrome.windows.remove(popupWindowId).catch(() => { });
+                resolve({ ok: true, token: tokenCaptured });
+            }
+            return;
+        }
+
+        console.log('[AIDA/Auth/TS] Step: waiting for template capture (up to 20s)...');
+        let checks = 0;
+        const maxChecks = 10; // 10 * 2s = 20s
+
+        const checkInterval = setInterval(async () => {
+            checks++;
+            if (getResolved()) {
+                clearInterval(checkInterval);
+                return;
+            }
+
+            const s = await chrome.storage.local.get('settings');
+            const tmpl = s?.settings?.truckstopRequestTemplate;
+            if (tmpl && tmpl.url) {
+                console.log('[AIDA/Auth/TS] Step: template captured ✓ — closing popup');
+                clearInterval(checkInterval);
+                if (!getResolved()) {
+                    setResolved(true);
+                    clearTimeout(timeout);
+                    cleanup();
+                    chrome.windows.remove(popupWindowId).catch(() => { });
+                    resolve({ ok: true, token: tokenCaptured });
+                }
+                return;
+            }
+
+            if (checks >= maxChecks) {
+                console.warn('[AIDA/Auth/TS] Step: template NOT captured after 20s — closing popup anyway');
+                clearInterval(checkInterval);
+                if (!getResolved()) {
+                    setResolved(true);
+                    clearTimeout(timeout);
+                    cleanup();
+                    chrome.windows.remove(popupWindowId).catch(() => { });
+                    resolve({ ok: true, token: tokenCaptured });
+                }
+            }
+        }, 2000);
     },
 
     /**
