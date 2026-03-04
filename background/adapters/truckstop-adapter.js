@@ -204,6 +204,24 @@ const TruckstopAdapter = {
                     if (params?.radius != null) { m.origin_radius = Number(params.radius) || 125; modified = true; }
                     if (params?.dateFrom) { m.pickup_date_begin = String(params.dateFrom).slice(0, 10); modified = true; }
                     if (params?.dateTo) { m.pickup_date_end = String(params.dateTo).slice(0, 10); modified = true; }
+
+                    // Equipment
+                    if (params?.equipment) {
+                        const TS_EQUIP = {
+                            'VAN': 'Van', 'REEFER': 'Reefer', 'FLATBED': 'Flatbed',
+                            'STEPDECK': 'Step Deck', 'DOUBLEDROP': 'Double Drop',
+                            'LOWBOY': 'Lowboy', 'RGN': 'Removable Gooseneck',
+                            'HOPPER': 'Hopper Bottom', 'TANKER': 'Tanker',
+                            'POWERONLY': 'Power Only', 'CONTAINER': 'Container',
+                            'DUMP': 'Dump Trailer', 'AUTOCARRIER': 'Auto Carrier',
+                            'LANDOLL': 'Landoll', 'MAXI': 'Maxi'
+                        };
+                        const tsName = TS_EQUIP[params.equipment] || params.equipment;
+                        const eqKeys = ['equipmentType', 'equipment_type', 'equipment', 'equipmentCode', 'trailerType'];
+                        for (const k of eqKeys) {
+                            if (m[k] !== undefined) { m[k] = tsName; modified = true; }
+                        }
+                    }
                     if (modified) {
                         if (hasNestedArgs) vars.args = m;
                         else parsed.variables = m;

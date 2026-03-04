@@ -43,31 +43,25 @@ const EQ_NAMES = {
     'VF': 'Van or Flatbed', 'VT': 'Van/Flatbed w/Tarps', 'VR': 'Van or Reefer'
 };
 
-// Маппинг UI-выбора → DAT equipment CLASSES (FreightSearchEquipmentClassV2 enum).
-// API принимает classes (V, R, F, D, B, Z, O, T, S), а НЕ eqTypes (VA, RA, FT и т.д.).
-// Каждый class включает все свои подтипы автоматически:
-//   V → V,VA,VS,V2,VZ,VH,VI,VN,VG,VL,VB,V3,VV,VW,VC,VP,VM,OT,VF,VT,VR
-//   R → R,RA,R2,RZ,RN,RL,RV,RM,RP
-//   F → F,FA,FN,F2,FZ,FH,MX,FD,FC,FS,FT,FM,FO,FR,CN,DD,LA,DT,LB,LR,LO,RG,SR,ST,TT
-//   D → DD,FD,SD,SR    B → HB,NU    Z → FZ,RZ,VZ
-//   O → AC,CV,PO,SB,SV,SZ,SC,SM,BR,BZ,PT,PL    T → TA,TN,TS
-//   S → IR,MV,RV,V2,VH,VI,VL,OT,VB,V3,VV,VC,VM
+// Маппинг UI-выбора → DAT equipment.
+// { classes: [...] } — широкий поиск (все подтипы класса)
+// { types: [...] }  — точный поиск (конкретные подтипы)
 const EQUIPMENT_MAP = {
-    'VAN': ['V'],
-    'REEFER': ['R'],
-    'FLATBED': ['F'],
-    'STEPDECK': ['D'],       // SD + SR + SN
-    'DOUBLEDROP': ['F'],       // DD входит в Flatbed class
-    'LOWBOY': ['F'],       // LB, LO входят в Flatbed class
-    'RGN': ['F'],       // RG входит в Flatbed class
-    'HOPPER': ['B'],       // HB входит в Bulk class
-    'TANKER': ['T'],
-    'POWERONLY': ['O'],       // PO входит в Other class
-    'CONTAINER': ['O'],       // C входит в Other class
-    'DUMP': ['F'],       // DT входит в Flatbed class
-    'AUTOCARRIER': ['O'],       // AC входит в Other class
-    'LANDOLL': ['F'],       // LA входит в Flatbed class
-    'MAXI': ['F']        // MX входит в Flatbed class
+    'VAN': { classes: ['V'] },
+    'REEFER': { classes: ['R'] },
+    'FLATBED': { classes: ['F'] },
+    'STEPDECK': { types: ['SD', 'SR', 'SN'] },
+    'DOUBLEDROP': { types: ['DD'] },
+    'LOWBOY': { types: ['LB', 'LO', 'LR'] },
+    'RGN': { types: ['RG'] },
+    'HOPPER': { types: ['HB'] },
+    'TANKER': { types: ['TA', 'TS', 'TN'] },
+    'POWERONLY': { types: ['PO', 'PL', 'PT'] },
+    'CONTAINER': { types: ['C', 'CI', 'CR'] },
+    'DUMP': { types: ['DT'] },
+    'AUTOCARRIER': { types: ['AC'] },
+    'LANDOLL': { types: ['LA'] },
+    'MAXI': { types: ['MX'] }
 };
 
 // ============================================================
@@ -282,7 +276,7 @@ async function getLocationSuggestion(token, lookupTerm) {
  * originPlace/destPlace — результат getLocationSuggestion (с latitude, longitude, placeId); без них API возвращает 400.
  */
 function buildGraphQLRequest(params, originPlace, destPlace) {
-    const eqCodes = EQUIPMENT_MAP[params.equipment] || ['V'];
+    const eqEntry = EQUIPMENT_MAP[params.equipment] || { classes: ['V'] };
     const maxOriginMiles = Math.min(Number(params.radius) || 50, 500);
     const maxDestMiles = 150;
 
@@ -316,7 +310,7 @@ function buildGraphQLRequest(params, originPlace, destPlace) {
             },
             destination: destPlaceObj ? { place: destPlaceObj } : { open: true }
         },
-        equipment: { classes: eqCodes },
+        equipment: eqEntry.classes ? { classes: eqEntry.classes } : { types: eqEntry.types },
         filters: {
             excludePostingIds: [],
             includeOnlyBookable: false,
