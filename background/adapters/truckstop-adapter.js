@@ -239,19 +239,22 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        // Удаляем Authorization из template headers!
-        // Truckstop GraphQL (Hasura) аутентифицируется через cookies (credentials: include),
-        // а НЕ через Bearer token. Angular interceptor добавляет JWT при захвате template,
-        // но этот JWT привязан к сессии страницы и Hasura не может его верифицировать
-        // из контекста Service Worker → "Could not verify JWT" ошибка.
-        delete headers['Authorization'];
-        delete headers['authorization'];
+        // ЗАМЕНЯЕМ Authorization на свежий JWT (не используем старый из template!)
+        // API требует Authorization или Cookie header в JWT authentication mode.
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         if (!headers['Origin']) headers['Origin'] = 'https://main.truckstop.com';
         if (!headers['Referer']) headers['Referer'] = 'https://main.truckstop.com/';
         if (Array.isArray(template.cookies) && template.cookies.length > 0) {
             headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
         }
+
+        // Debug: логируем финальный запрос для сравнения с оригиналом
+        const finalBody = typeof body === 'string' ? body : JSON.stringify(body);
+        console.log('[AIDA/Truckstop] Step: FINAL REQUEST URL:', template.url);
+        console.log('[AIDA/Truckstop] Step: FINAL REQUEST BODY:', finalBody?.slice(0, 500));
 
         try {
             const resp = await fetch(template.url, {
