@@ -330,15 +330,15 @@ body {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 4px 8px;
+    padding: 6px 8px 4px;
     font-size: var(--font-size-sm);
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--text-primary);
-    height: 28px;
-    line-height: 20px;
+    height: 32px;
+    line-height: 22px;
     user-select: none;
 }
 
