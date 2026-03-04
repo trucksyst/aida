@@ -255,7 +255,15 @@ const TruckstopAdapter = {
                 body: typeof body === 'string' ? body : JSON.stringify(body)
             });
             const text = await resp.text();
+            console.log('[AIDA/Truckstop] Step: API response status:', resp.status, 'body preview:', text?.slice(0, 300));
             if (!resp.ok) {
+                // 401/403 → токен невалидный
+                if (resp.status === 401 || resp.status === 403) {
+                    return {
+                        ok: false, loads: [], meta: { board: BOARD },
+                        error: { code: 'AUTH_REQUIRED', message: `HTTP ${resp.status}: token rejected`, retriable: true }
+                    };
+                }
                 return {
                     ok: false, loads: [], meta: { board: BOARD },
                     error: { code: 'FETCH_FAILED', message: `HTTP ${resp.status}: ${text?.slice(0, 100)}`, retriable: resp.status >= 500 }
@@ -263,6 +271,10 @@ const TruckstopAdapter = {
             }
             if (!text || text.trim().charAt(0) === '<') return { ok: true, loads: [], meta: { board: BOARD } };
             const data = JSON.parse(text);
+            // Логируем GraphQL ошибки если есть
+            if (data.errors) {
+                console.warn('[AIDA/Truckstop] GraphQL errors:', JSON.stringify(data.errors).slice(0, 300));
+            }
             const rawResults = findLoadsArray(data, true);
             if (!Array.isArray(rawResults)) return { ok: true, loads: [], meta: { board: BOARD } };
             const loads = normalizeTruckstopResults(rawResults);

@@ -100,18 +100,35 @@ const AuthTruckstop = {
                     }
                 }, 180000);
 
-                // Следим за URL-ами в popup
+                // Следим за URL-ами в popup — логируем ВСЕ для отладки
                 const onUpdated = async (tabId, changeInfo, tab) => {
                     if (resolved) return;
                     if (tab.windowId !== popupWindowId) return;
-                    if (!changeInfo.url) return;
 
-                    const url = changeInfo.url;
+                    // === DEBUG: логируем ВСЁ что происходит в popup ===
+                    if (changeInfo.url) {
+                        console.log('[AIDA/Auth/TS] popup URL →', changeInfo.url.slice(0, 250));
+                    }
+                    if (changeInfo.status) {
+                        console.log('[AIDA/Auth/TS] popup status:', changeInfo.status, 'url:', (tab?.url || '').slice(0, 200));
+                    }
 
-                    // Ловим redirect на main.truckstop.com?id={userId}
-                    if (url.includes('main.truckstop.com') && url.includes('id=')) {
-                        const userId = this._extractUserIdFromUrl(url);
-                        if (userId) {
+                    const url = changeInfo.url || '';
+
+                    // === 1. Ловим redirect на main.truckstop.com (с id= или без) ===
+                    if (url.includes('main.truckstop.com')) {
+                        // Пробуем извлечь userId из URL
+                        let userId = this._extractUserIdFromUrl(url);
+
+                        // Иногда id может быть в hash или другом формате
+                        if (!userId && url.includes('id=')) {
+                            try {
+                                const match = url.match(/[?&]id=([^&]+)/);
+                                if (match) userId = match[1];
+                            } catch (_) { }
+                        }
+
+                        if (userId && !userIdCaptured) {
                             userIdCaptured = userId;
                             console.log('[AIDA/Auth/TS] Step: userId captured from redirect:', userId);
 
@@ -121,9 +138,11 @@ const AuthTruckstop = {
                                 if (token) {
                                     tokenCaptured = token;
                                     await this._saveToken(token, 'login', userId);
-                                    console.log('[AIDA/Auth/TS] Step: v5 token obtained and saved');
+                                    // Также пишем в Storage напрямую для совместимости
+                                    await chrome.storage.local.set({ 'token:truckstop': token });
+                                    console.log('[AIDA/Auth/TS] Step: v5 token obtained and saved ✓');
 
-                                    // Даём странице загрузиться 3 сек (для захвата template харвестером)
+                                    // Даём странице загрузиться 5 сек (для захвата template харвестером)
                                     setTimeout(() => {
                                         if (!resolved) {
                                             resolved = true;
@@ -132,12 +151,39 @@ const AuthTruckstop = {
                                             chrome.windows.remove(popupWindowId).catch(() => { });
                                             resolve({ ok: true, token: tokenCaptured });
                                         }
-                                    }, 3000);
+                                    }, 5000);
                                 }
                             } catch (e) {
                                 console.warn('[AIDA/Auth/TS] v5 token fetch failed:', e.message);
-                                // Не reject-им — ждём возможного TOKEN_HARVESTED от страницы
                             }
+                        }
+                    }
+
+                    // === 2. Ловим callback URL (app.truckstop.com/Landing) ===
+                    if (url.includes('app.truckstop.com/Landing')) {
+                        console.log('[AIDA/Auth/TS] Step: PingOne callback detected, waiting for redirect...');
+                    }
+
+                    // === 3. Page complete на main.truckstop.com — fallback через harvester ===
+                    if (changeInfo.status === 'complete' && tab?.url?.includes('main.truckstop.com')) {
+                        if (!tokenCaptured) {
+                            console.log('[AIDA/Auth/TS] Step: main.truckstop.com loaded, waiting for harvester token (5s)...');
+                            // Ждём 5 сек — харвестер должен поймать токен
+                            setTimeout(async () => {
+                                if (resolved || tokenCaptured) return;
+                                // Проверяем storage — харвестер мог записать токен
+                                const stored = await chrome.storage.local.get('token:truckstop');
+                                const storedToken = stored['token:truckstop'];
+                                if (storedToken) {
+                                    tokenCaptured = storedToken;
+                                    console.log('[AIDA/Auth/TS] Step: token from storage after page load ✓');
+                                    resolved = true;
+                                    clearTimeout(timeout);
+                                    cleanup();
+                                    chrome.windows.remove(popupWindowId).catch(() => { });
+                                    resolve({ ok: true, token: tokenCaptured });
+                                }
+                            }, 5000);
                         }
                     }
                 };
