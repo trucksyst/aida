@@ -233,6 +233,14 @@ const AuthDat = {
                 const onUpdated = (updatedTabId, changeInfo, updatedTab) => {
                     if (resolved || updatedTabId !== tabId) return;
 
+                    // === DEBUG: логируем ВСЁ что происходит в скрытом табе ===
+                    if (changeInfo.url) {
+                        console.log('[AIDA/Auth/DAT] silentRefresh TAB URL →', changeInfo.url.slice(0, 200));
+                    }
+                    if (changeInfo.status) {
+                        console.log('[AIDA/Auth/DAT] silentRefresh TAB status:', changeInfo.status, 'url:', (updatedTab?.url || '').slice(0, 200));
+                    }
+
                     const navUrl = changeInfo.url || '';
 
                     // 1. Callback URL с токеном
