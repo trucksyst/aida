@@ -185,13 +185,11 @@ const AuthDat = {
     async silentRefresh() {
         console.log('[AIDA/Auth/DAT] Step: attempting silent refresh');
 
-        const url = `${DAT_AUTH_CONFIG.authorizeUrl}?` + new URLSearchParams({
-            client_id: DAT_AUTH_CONFIG.clientId,
-            response_type: DAT_AUTH_CONFIG.responseType,
-            redirect_uri: DAT_AUTH_CONFIG.callbackUrl,
-            scope: DAT_AUTH_CONFIG.scope,
-            prompt: 'none'
-        }).toString();
+        // Открываем one.dat.com/search-loads в скрытом табе.
+        // Страница сама сделает Auth0 redirect (через iframe или full redirect).
+        // Харвестер на one.dat.com поймает токен через TOKEN_HARVESTED.
+        // Это надёжнее чем прямой Auth0 URL — Chrome пропускает быстрые fragment-redirects.
+        const url = 'https://one.dat.com/search-loads';
 
         return new Promise((resolve) => {
             chrome.tabs.create({ url, active: false }, (tab) => {
