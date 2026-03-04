@@ -406,32 +406,49 @@ body {
     margin-left: auto;
 }
 
-.preset-trigger {
-    display: inline-flex;
+.preset-display {
+    display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     cursor: pointer;
-    height: 32px;
-    padding: 0 8px;
-    transition: border-color var(--transition), color var(--transition), background var(--transition);
+    height: 28px;
+    padding: 4px 8px;
+    min-width: 180px;
+    max-width: 280px;
+    transition: border-color var(--transition), background var(--transition);
+    user-select: none;
 }
 
-.preset-trigger:hover {
+.preset-display:hover {
     border-color: var(--accent);
-    color: var(--text-primary);
     background: var(--bg-hover);
 }
 
-.preset-trigger.has-presets {
-    color: var(--accent);
+.preset-display.has-presets {
+    border-color: var(--accent);
+}
+
+.preset-display-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-sm);
+    line-height: 20px;
+}
+
+.preset-display-text.placeholder {
+    color: var(--text-muted);
+    font-style: italic;
 }
 
 .preset-caret {
-    opacity: 0.6;
+    opacity: 0.5;
+    flex-shrink: 0;
 }
 
 .preset-save-btn {

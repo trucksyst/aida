@@ -239,6 +239,7 @@ function attachLocationAutocomplete(cityId, stateId, dropdownId) {
                 }
                 hide();
                 cityEl.focus();
+                if (typeof updatePresetDisplay === 'function') updatePresetDisplay();
             });
         });
     }
@@ -531,6 +532,29 @@ function renderPresetDropdown() {
     });
 }
 
+/** Update the live preview display from current form values. */
+function updatePresetDisplay() {
+    const textEl = document.getElementById('preset-display-text');
+    if (!textEl) return;
+
+    const p = buildPresetFromForm();
+    const lbl = presetLabel(p);
+
+    if (!p.origin && !p.originState) {
+        textEl.textContent = 'Select or type params…';
+        textEl.classList.add('placeholder');
+    } else {
+        textEl.textContent = lbl;
+        textEl.classList.remove('placeholder');
+    }
+
+    // Highlight display if matches a saved preset
+    const displayEl = document.getElementById('preset-trigger');
+    if (displayEl) {
+        displayEl.classList.toggle('has-presets', presetExists(p));
+    }
+}
+
 /** Init preset-related event listeners. */
 function initSearchPresets() {
     const trigger = document.getElementById('preset-trigger');
@@ -557,6 +581,23 @@ function initSearchPresets() {
             dropdown.classList.remove('open');
         }
     });
+
+    // Live preview: update display on any search field change
+    ['origin-city', 'origin-state', 'search-radius', 'dest-city', 'dest-state'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', updatePresetDisplay);
+            el.addEventListener('change', updatePresetDisplay);
+        }
+    });
+
+    // Equipment checkboxes — also update preview
+    document.querySelectorAll('#equip-dropdown input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', updatePresetDisplay);
+    });
+
+    // Initial display
+    updatePresetDisplay();
 }
 
 // ============================================================

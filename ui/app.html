@@ -146,15 +146,13 @@
 
                         <!-- Search Presets -->
                         <div class="search-presets" id="search-presets">
-                            <button class="preset-trigger" id="preset-trigger" title="Saved search presets">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M4 6h16M4 12h16M4 18h16" />
-                                </svg>
-                                <svg class="preset-caret" width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
+                            <div class="preset-display" id="preset-trigger" title="Click to open saved presets">
+                                <span class="preset-display-text" id="preset-display-text">Select or type params…</span>
+                                <svg class="preset-caret" width="10" height="10" viewBox="0 0 24 24"
+                                    fill="currentColor">
                                     <path d="M7 10l5 5 5-5z" />
                                 </svg>
-                            </button>
+                            </div>
                             <div class="preset-dropdown" id="preset-dropdown">
                                 <div class="preset-list" id="preset-list">
                                     <!-- Filled by JS -->
