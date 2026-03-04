@@ -482,10 +482,13 @@ const AuthTruckstop = {
      * Проверяем storage каждые 2 сек, до 20 сек.
      */
     async _waitForTemplate(popupWindowId, timeout, cleanup, resolvedFlag, tokenCaptured, resolve, getResolved, setResolved) {
+        // Правильный ключ: Storage использует namespace-префиксы!
+        const TMPL_KEY = 'settings:truckstopRequestTemplate';
+
         // Сначала проверяем — может template уже есть
-        const settings = await chrome.storage.local.get('settings');
-        const existing = settings?.settings?.truckstopRequestTemplate;
-        if (existing && existing.url) {
+        const existing = await chrome.storage.local.get(TMPL_KEY);
+        const tmplExist = existing[TMPL_KEY];
+        if (tmplExist && tmplExist.url) {
             console.log('[AIDA/Auth/TS] Step: template already in storage, closing popup');
             if (!getResolved()) {
                 setResolved(true);
@@ -508,8 +511,8 @@ const AuthTruckstop = {
                 return;
             }
 
-            const s = await chrome.storage.local.get('settings');
-            const tmpl = s?.settings?.truckstopRequestTemplate;
+            const s = await chrome.storage.local.get(TMPL_KEY);
+            const tmpl = s[TMPL_KEY];
             if (tmpl && tmpl.url) {
                 console.log('[AIDA/Auth/TS] Step: template captured ✓ — closing popup');
                 clearInterval(checkInterval);
