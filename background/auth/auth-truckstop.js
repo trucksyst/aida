@@ -181,21 +181,21 @@ const AuthTruckstop = {
                     }
                 };
 
-                // Слушаем TOKEN_HARVESTED от харвестера (fallback)
+                // Слушаем TOKEN_HARVESTED от харвестера (fallback для токена)
+                // НЕ закрываем popup здесь — _waitForTemplate управляет закрытием
                 const onMessage = (message) => {
                     if (resolved) return;
                     if (message.type === 'TOKEN_HARVESTED' && message.board === 'truckstop') {
-                        tokenCaptured = message.token || tokenCaptured;
-                        console.log('[AIDA/Auth/TS] Step: token from harvester. Closing in 2s...');
-                        setTimeout(() => {
-                            if (!resolved) {
-                                resolved = true;
-                                clearTimeout(timeout);
-                                cleanup();
-                                chrome.windows.remove(popupWindowId).catch(() => { });
-                                resolve({ ok: true, token: tokenCaptured });
-                            }
-                        }, 2000);
+                        if (message.token) tokenCaptured = message.token;
+                        console.log('[AIDA/Auth/TS] Step: token from harvester (popup stays open for template)');
+
+                        // Если v5 token ещё не получен — сохраняем от харвестера
+                        if (!userIdCaptured && tokenCaptured) {
+                            this._saveToken(tokenCaptured, 'harvester').catch(console.warn);
+                            chrome.storage.local.set({ 'token:truckstop': tokenCaptured }).catch(console.warn);
+                            // Запускаем ожидание template
+                            this._waitForTemplate(popupWindowId, timeout, cleanup, resolved, tokenCaptured, resolve, () => resolved, (v) => { resolved = v; });
+                        }
                     }
                 };
 
