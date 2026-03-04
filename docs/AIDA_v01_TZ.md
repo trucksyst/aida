@@ -412,11 +412,32 @@ background/auth/
 {
   origin:    { city: 'Chicago', state: 'IL', zip: '60601' },
   radius:    10,         // miles
-  equipment: 'VAN',      // VAN | REEFER | FLATBED
+  equipment: 'VAN',      // см. таблицу Equipment Types ниже
   dateFrom:  '2026-03-01',
   dateTo:    '2026-03-03'
 }
 ```
+
+### Equipment Types (15 типов — пересечение DAT + Truckstop + TruckerPath)
+
+| # | UI value | DAT код | Описание |
+|---|----------|---------|----------|
+| 1 | VAN | V | Dry Van — закрытый прицеп |
+| 2 | REEFER | R | Рефрижератор |
+| 3 | FLATBED | F | Открытая платформа |
+| 4 | STEPDECK | SD | Step Deck — двухуровневая платформа |
+| 5 | DOUBLEDROP | DD | Double Drop — пониженная секция |
+| 6 | LOWBOY | LB | Низкорамная платформа |
+| 7 | RGN | RG | Removable Gooseneck — съёмная шея |
+| 8 | HOPPER | HB | Hopper Bottom — сыпучие грузы |
+| 9 | TANKER | TA | Цистерна |
+| 10 | POWERONLY | PO | Только тягач (без прицепа) |
+| 11 | CONTAINER | C | Контейнер |
+| 12 | DUMP | DT | Самосвальный прицеп |
+| 13 | AUTOCARRIER | AC | Автовоз |
+| 14 | LANDOLL | LA | Drop Deck Landoll |
+| 15 | MAXI | MX | Flatbed Maxi (двойная платформа) |
+
 
 ---
 

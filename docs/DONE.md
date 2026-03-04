@@ -42,8 +42,17 @@
 - Timeout увеличен 15с → 30с
 - **Результат**: popup появляется ТОЛЬКО когда реально нужен пароль (Auth0 cookie протухла)
 
+### Equipment Types — исследование (15 типов)
+- Проведён анализ всех equipment types по трём бордам (DAT, Truckstop, TruckerPath/123LB)
+- Выбрано **15 типов** которые поддерживаются всеми 3 бордами:
+  VAN, REEFER, FLATBED, STEPDECK, DOUBLEDROP, LOWBOY, RGN, HOPPER, TANKER, POWERONLY, CONTAINER, DUMP, AUTOCARRIER, LANDOLL, MAXI
+- ТЗ обновлено (таблица Equipment Types)
+- **Реализация в UI/адаптерах — TODO**
+
 ### TODO (не реализовано)
 - Login popup открывается как отдельное окно. Можно переделать на вкладку в том же окне (`chrome.tabs.create({ windowId })` вместо `chrome.windows.create`)
+- Equipment dropdown в UI — добавить все 15 типов (сейчас 3)
+- EQUIPMENT_MAP в dat-adapter — добавить маппинг для 12 новых типов
 
 ---
 
