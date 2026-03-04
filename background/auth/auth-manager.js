@@ -16,6 +16,7 @@
  */
 
 import AuthDat from './auth-dat.js';
+import AuthTruckstop from './auth-truckstop.js';
 
 /**
  * Реестр auth-модулей по бордам.
@@ -23,7 +24,7 @@ import AuthDat from './auth-dat.js';
  */
 const AUTH_MODULES = {
     dat: AuthDat,
-    // truckstop: AuthTruckstop,   // TODO: реализовать
+    truckstop: AuthTruckstop,
     // tp: AuthTruckerpath,        // TODO: реализовать
 };
 
