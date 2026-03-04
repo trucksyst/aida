@@ -239,8 +239,8 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        // ЗАМЕНЯЕМ Authorization на свежий JWT (не используем старый из template!)
-        // API требует Authorization или Cookie header в JWT authentication mode.
+        // ЗАМЕНЯЕМ Authorization на свежий JWT от auth-модуля 
+        // (старый из template может быть expired)
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
@@ -251,17 +251,22 @@ const TruckstopAdapter = {
             headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
         }
 
-        // Debug: логируем финальный запрос для сравнения с оригиналом
+        // === DEBUG: сравнение оригинала и AIDA ===
         const finalBody = typeof body === 'string' ? body : JSON.stringify(body);
-        console.log('[AIDA/Truckstop] Step: FINAL REQUEST URL:', template.url);
-        console.log('[AIDA/Truckstop] Step: FINAL REQUEST BODY:', finalBody?.slice(0, 500));
+        console.log('=== [AIDA/Truckstop] DEBUG: ORIGINAL template body ===');
+        console.log(String(template.body || '').slice(0, 800));
+        console.log('=== [AIDA/Truckstop] DEBUG: AIDA modified body ===');
+        console.log(String(finalBody || '').slice(0, 800));
+        console.log('=== [AIDA/Truckstop] DEBUG: Headers sent ===');
+        console.log(JSON.stringify(Object.keys(headers)));
+        console.log('Authorization:', headers['Authorization']?.slice(0, 50), '...');
 
         try {
             const resp = await fetch(template.url, {
                 method: template.method || 'POST',
                 headers,
                 credentials: 'include',
-                body: typeof body === 'string' ? body : JSON.stringify(body)
+                body: finalBody
             });
             const text = await resp.text();
             console.log('[AIDA/Truckstop] Step: API response status:', resp.status, 'body preview:', text?.slice(0, 300));
