@@ -239,9 +239,13 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        // НЕ добавляем Authorization автоматически!
+        // Удаляем Authorization из template headers!
         // Truckstop GraphQL (Hasura) аутентифицируется через cookies (credentials: include),
-        // а НЕ через Bearer token. Добавление JWT вызывает "Could not verify JWT" ошибку.
+        // а НЕ через Bearer token. Angular interceptor добавляет JWT при захвате template,
+        // но этот JWT привязан к сессии страницы и Hasura не может его верифицировать
+        // из контекста Service Worker → "Could not verify JWT" ошибка.
+        delete headers['Authorization'];
+        delete headers['authorization'];
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         if (!headers['Origin']) headers['Origin'] = 'https://main.truckstop.com';
         if (!headers['Referer']) headers['Referer'] = 'https://main.truckstop.com/';
