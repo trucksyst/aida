@@ -175,6 +175,11 @@ const AuthDat = {
      * Silent refresh — обновить токен без участия пользователя.
      * Использует сессию Auth0 (cookies login.dat.com) + prompt=none.
      *
+     * Ловит токен из 3 источников:
+     * 1. Callback URL (#access_token=...)
+     * 2. one.dat.com загрузилась (callback мог проскочить, но токен в storage от харвестера)
+     * 3. Харвестер TOKEN_HARVESTED через runtime.onMessage
+     *
      * Возвращает: { ok: true, token } или { ok: false, reason }
      */
     async silentRefresh() {
@@ -197,71 +202,108 @@ const AuthDat = {
 
                 const tabId = tab.id;
                 let resolved = false;
+                let tokenCaptured = null;
 
-                // Таймаут 15 сек
-                const timeout = setTimeout(() => {
-                    if (!resolved) {
-                        resolved = true;
-                        cleanup();
-                        chrome.tabs.remove(tabId).catch(() => { });
-                        console.warn('[AIDA/Auth/DAT] Silent refresh timeout');
-                        resolve({ ok: false, reason: 'timeout' });
+                const finish = (ok, token, reason) => {
+                    if (resolved) return;
+                    resolved = true;
+                    clearTimeout(timeout);
+                    cleanup();
+                    chrome.tabs.remove(tabId).catch(() => { });
+                    if (ok && token) {
+                        this._saveToken(token, 'silent_refresh').then(() => {
+                            console.log('[AIDA/Auth/DAT] Step: token refreshed silently');
+                            resolve({ ok: true, token });
+                        });
+                    } else {
+                        resolve({ ok: false, reason: reason || 'unknown' });
                     }
-                }, 15000);
+                };
 
-                const onUpdated = (updatedTabId, changeInfo) => {
+                // Таймаут 30 сек
+                const timeout = setTimeout(() => {
+                    if (tokenCaptured) {
+                        finish(true, tokenCaptured);
+                    } else {
+                        console.warn('[AIDA/Auth/DAT] Silent refresh timeout');
+                        finish(false, null, 'timeout');
+                    }
+                }, 30000);
+
+                const onUpdated = (updatedTabId, changeInfo, updatedTab) => {
                     if (resolved || updatedTabId !== tabId) return;
-                    if (!changeInfo.url) return;
 
-                    const navUrl = changeInfo.url;
+                    const navUrl = changeInfo.url || '';
 
-                    // Успех: callback с токеном
+                    // 1. Callback URL с токеном
                     if (navUrl.startsWith(DAT_AUTH_CONFIG.callbackUrl)) {
                         const token = this._extractTokenFromUrl(navUrl);
-                        resolved = true;
-                        clearTimeout(timeout);
-                        cleanup();
-                        chrome.tabs.remove(tabId).catch(() => { });
-
                         if (token) {
-                            this._saveToken(token, 'silent_refresh').then(() => {
-                                console.log('[AIDA/Auth/DAT] Step: token refreshed silently');
-                                resolve({ ok: true, token });
-                            });
-                        } else {
-                            console.warn('[AIDA/Auth/DAT] Silent refresh: callback without token');
-                            resolve({ ok: false, reason: 'no_token_in_callback' });
+                            tokenCaptured = token;
+                            console.log('[AIDA/Auth/DAT] Silent refresh: token from callback');
+                            finish(true, token);
+                            return;
                         }
                     }
 
-                    // Неудача: Auth0 вернул страницу логина (сессия мертва)
+                    // 2. Auth0 вернул login page → сессия мертва
                     if (navUrl.includes('login.dat.com/u/login')) {
-                        resolved = true;
-                        clearTimeout(timeout);
-                        cleanup();
-                        chrome.tabs.remove(tabId).catch(() => { });
                         console.log('[AIDA/Auth/DAT] Silent refresh: session expired, login required');
-                        resolve({ ok: false, reason: 'session_expired' });
+                        finish(false, null, 'session_expired');
+                        return;
+                    }
+
+                    // 3. one.dat.com загрузилась (callback мог проскочить)
+                    if (changeInfo.status === 'complete' && updatedTab?.url?.includes('one.dat.com')) {
+                        // Страница загрузилась — токен мог быть пойман харвестером
+                        // Ждём 2 сек и проверяем storage
+                        setTimeout(async () => {
+                            if (resolved) return;
+                            if (tokenCaptured) {
+                                finish(true, tokenCaptured);
+                                return;
+                            }
+                            // Проверяем storage — харвестер мог записать токен
+                            const stored = await chrome.storage.local.get('token:dat');
+                            const storedToken = stored['token:dat'];
+                            if (storedToken) {
+                                console.log('[AIDA/Auth/DAT] Silent refresh: token from storage after page load');
+                                finish(true, storedToken);
+                            }
+                        }, 2000);
+                    }
+                };
+
+                // 4. Харвестер поймал токен
+                const onMessage = (message) => {
+                    if (resolved) return;
+                    if (message.type === 'TOKEN_HARVESTED' && message.board === 'dat' && message.token) {
+                        tokenCaptured = message.token;
+                        console.log('[AIDA/Auth/DAT] Silent refresh: token from harvester');
+                        finish(true, message.token);
                     }
                 };
 
                 const onRemoved = (removedTabId) => {
                     if (removedTabId !== tabId) return;
                     if (!resolved) {
-                        resolved = true;
-                        clearTimeout(timeout);
-                        cleanup();
-                        resolve({ ok: false, reason: 'tab_closed' });
+                        if (tokenCaptured) {
+                            finish(true, tokenCaptured);
+                        } else {
+                            finish(false, null, 'tab_closed');
+                        }
                     }
                 };
 
                 const cleanup = () => {
                     chrome.tabs.onUpdated.removeListener(onUpdated);
                     chrome.tabs.onRemoved.removeListener(onRemoved);
+                    chrome.runtime.onMessage.removeListener(onMessage);
                 };
 
                 chrome.tabs.onUpdated.addListener(onUpdated);
                 chrome.tabs.onRemoved.addListener(onRemoved);
+                chrome.runtime.onMessage.addListener(onMessage);
             });
         });
     },
