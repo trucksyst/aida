@@ -35,6 +35,16 @@
 - auth-dat.js: убран пустой блок, исправлен синтаксис скобок
 - app.js: `ensureSearchParamsAndSearch()` — единая точка для авто-поиска (DRY)
 
+### DAT Silent Refresh (исправлен)
+- **Проблема**: `silentRefresh` открывал Auth0 URL напрямую (`prompt=none`). Chrome пропускал быстрый fragment-redirect (`#access_token=...`) в `tabs.onUpdated` → timeout → popup открывался хотя пароль не нужен
+- **Решение**: silentRefresh теперь открывает `one.dat.com/search-loads` в скрытом табе. DAT сам делает Auth0 redirect, харвестер на `one.dat.com` ловит токен через `TOKEN_HARVESTED`
+- silentRefresh ловит токен из 3 источников: callback URL, storage после page load, TOKEN_HARVESTED от харвестера
+- Timeout увеличен 15с → 30с
+- **Результат**: popup появляется ТОЛЬКО когда реально нужен пароль (Auth0 cookie протухла)
+
+### TODO (не реализовано)
+- Login popup открывается как отдельное окно. Можно переделать на вкладку в том же окне (`chrome.tabs.create({ windowId })` вместо `chrome.windows.create`)
+
 ---
 
 ## Хранение куки и ключей
