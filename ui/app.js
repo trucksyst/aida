@@ -21,8 +21,11 @@ const state = {
     sortAsc: false,
     agentEnabled: false,
     boardStatus: { dat: false, truckstop: false },
-    lastRefreshTime: null
+    lastRefreshTime: null,
+    searchPresets: []   // max 8 saved search presets
 };
+
+const MAX_PRESETS = 8;
 
 // ============================================================
 // Core Communication
@@ -82,6 +85,9 @@ async function init() {
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
     renderTable();
     updateStatusBar();
+
+    // Load search presets from storage
+    await loadSearchPresets();
 
     bindEvents();
 
@@ -345,6 +351,215 @@ function initEquipMultiSelect() {
 }
 
 // ============================================================
+// Search Presets — save / load / delete / apply
+// ============================================================
+
+/** Build a human-readable label from preset data: "Chicago IL → Dallas TX  50  (V)(R)" */
+function presetLabel(p) {
+    let lbl = '';
+    if (p.origin) lbl += p.origin;
+    if (p.originState) lbl += ' ' + p.originState;
+    if (p.dest) {
+        lbl += ' → ' + p.dest;
+        if (p.destState) lbl += ' ' + p.destState;
+    }
+    if (p.radius != null) lbl += '  ' + p.radius;
+    if (p.equipment && p.equipment.length > 0) {
+        const codes = p.equipment.map(v => '(' + (EQUIP_SHORT[v] || v) + ')');
+        lbl += '  ' + codes.join('');
+    }
+    return lbl.trim() || 'Unnamed preset';
+}
+
+/** Load presets from chrome.storage.local into state. */
+async function loadSearchPresets() {
+    try {
+        const data = await new Promise(resolve =>
+            chrome.storage.local.get('searchPresets', r => resolve(r))
+        );
+        state.searchPresets = Array.isArray(data.searchPresets) ? data.searchPresets : [];
+    } catch (e) {
+        console.warn('[AIDA/UI] Failed to load search presets:', e);
+        state.searchPresets = [];
+    }
+    renderPresetDropdown();
+    console.log('[AIDA/UI] Step: loaded search presets, count:', state.searchPresets.length);
+}
+
+/** Persist current presets array to chrome.storage.local. */
+async function savePresetsToStorage() {
+    try {
+        await new Promise(resolve =>
+            chrome.storage.local.set({ searchPresets: state.searchPresets }, resolve)
+        );
+    } catch (e) {
+        console.warn('[AIDA/UI] Failed to save search presets:', e);
+    }
+}
+
+/** Create a preset object from current form values (no dates). */
+function buildPresetFromForm() {
+    return {
+        id: String(Date.now()),
+        origin: document.getElementById('origin-city').value.trim(),
+        originState: document.getElementById('origin-state').value.trim().toUpperCase(),
+        radius: parseInt(document.getElementById('search-radius').value) || 50,
+        dest: document.getElementById('dest-city').value.trim(),
+        destState: document.getElementById('dest-state').value.trim().toUpperCase(),
+        equipment: getSelectedEquipment()
+    };
+}
+
+/** Check if a preset with same params already exists. */
+function presetExists(p) {
+    return state.searchPresets.some(x =>
+        x.origin === p.origin &&
+        x.originState === p.originState &&
+        x.dest === p.dest &&
+        x.destState === p.destState &&
+        x.radius === p.radius &&
+        JSON.stringify(x.equipment.slice().sort()) === JSON.stringify(p.equipment.slice().sort())
+    );
+}
+
+/** Handle Save preset button click. */
+async function handlePresetSave() {
+    const p = buildPresetFromForm();
+    if (!p.origin && !p.originState) {
+        showToast('Fill in at least origin to save', 'error');
+        return;
+    }
+    if (state.searchPresets.length >= MAX_PRESETS) {
+        showToast(`Maximum ${MAX_PRESETS} presets. Delete one first.`, 'error');
+        return;
+    }
+    if (presetExists(p)) {
+        showToast('This preset already exists', 'error');
+        return;
+    }
+    state.searchPresets.push(p);
+    await savePresetsToStorage();
+    renderPresetDropdown();
+    showToast('Preset saved ✓');
+    console.log('[AIDA/UI] Step: preset saved:', presetLabel(p));
+    // Вариант B: save + search
+    doSearch();
+}
+
+/** Apply a preset to the form, set dates to today/today+1, then search. */
+function applyPreset(presetId) {
+    const p = state.searchPresets.find(x => x.id === presetId);
+    if (!p) return;
+    setVal('origin-city', p.origin || '');
+    setVal('origin-state', p.originState || '');
+    setVal('search-radius', p.radius != null ? p.radius : 50);
+    setVal('dest-city', p.dest || '');
+    setVal('dest-state', p.destState || '');
+    if (p.equipment) setEquipmentChecked(p.equipment);
+
+    // Даты: today и today+1
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setVal('date-from', today.toISOString().split('T')[0]);
+    setVal('date-to', tomorrow.toISOString().split('T')[0]);
+
+    // Закрыть dropdown
+    document.getElementById('preset-dropdown').classList.remove('open');
+
+    console.log('[AIDA/UI] Step: preset applied:', presetLabel(p));
+    // Вариант B: apply + auto-search
+    doSearch();
+}
+
+/** Delete a preset by id. */
+async function deletePreset(presetId) {
+    state.searchPresets = state.searchPresets.filter(x => x.id !== presetId);
+    await savePresetsToStorage();
+    renderPresetDropdown();
+    showToast('Preset deleted');
+    console.log('[AIDA/UI] Step: preset deleted, remaining:', state.searchPresets.length);
+}
+
+/** Render the presets dropdown items. */
+function renderPresetDropdown() {
+    const listEl = document.getElementById('preset-list');
+    const emptyEl = document.getElementById('preset-empty');
+    const triggerEl = document.getElementById('preset-trigger');
+
+    if (!listEl || !emptyEl || !triggerEl) return;
+
+    const presets = state.searchPresets;
+
+    // Toggle has-presets class on trigger
+    triggerEl.classList.toggle('has-presets', presets.length > 0);
+
+    if (presets.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.classList.add('visible');
+        return;
+    }
+
+    emptyEl.classList.remove('visible');
+    listEl.innerHTML = presets.map(p => {
+        const lbl = esc(presetLabel(p));
+        return `<div class="preset-item" data-id="${p.id}">
+            <span class="preset-item-label" title="${lbl}">${lbl}</span>
+            <button class="preset-item-apply" data-action="apply" data-id="${p.id}" title="Apply">✔</button>
+            <button class="preset-item-delete" data-action="delete" data-id="${p.id}" title="Delete">✕</button>
+        </div>`;
+    }).join('');
+
+    // Bind clicks
+    listEl.querySelectorAll('.preset-item-apply').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyPreset(btn.dataset.id);
+        });
+    });
+    listEl.querySelectorAll('.preset-item-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deletePreset(btn.dataset.id);
+        });
+    });
+    // Click on the row itself = apply
+    listEl.querySelectorAll('.preset-item').forEach(item => {
+        item.addEventListener('click', () => {
+            applyPreset(item.dataset.id);
+        });
+    });
+}
+
+/** Init preset-related event listeners. */
+function initSearchPresets() {
+    const trigger = document.getElementById('preset-trigger');
+    const dropdown = document.getElementById('preset-dropdown');
+    const saveBtn = document.getElementById('preset-save-btn');
+
+    // Toggle dropdown
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('open');
+        // Close equip dropdown if open
+        document.getElementById('equip-dropdown').classList.remove('open');
+    });
+
+    // Save button
+    saveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handlePresetSave();
+    });
+
+    // Close preset dropdown on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#search-presets')) {
+            dropdown.classList.remove('open');
+        }
+    });
+}
+
+// ============================================================
 // Events
 // ============================================================
 
@@ -352,6 +567,7 @@ function bindEvents() {
     attachLocationAutocomplete('origin-city', 'origin-state', 'origin-autocomplete');
     attachLocationAutocomplete('dest-city', 'dest-state', 'dest-autocomplete');
     initEquipMultiSelect();
+    initSearchPresets();
 
     // Sidebar navigation
     document.querySelectorAll('.sidebar-icon[data-section]').forEach(btn => {

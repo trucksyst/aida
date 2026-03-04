@@ -144,6 +144,34 @@
                             <input type="date" id="date-to">
                         </div>
 
+                        <!-- Search Presets -->
+                        <div class="search-presets" id="search-presets">
+                            <button class="preset-trigger" id="preset-trigger" title="Saved search presets">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 6h16M4 12h16M4 18h16" />
+                                </svg>
+                                <svg class="preset-caret" width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M7 10l5 5 5-5z" />
+                                </svg>
+                            </button>
+                            <div class="preset-dropdown" id="preset-dropdown">
+                                <div class="preset-list" id="preset-list">
+                                    <!-- Filled by JS -->
+                                </div>
+                                <div class="preset-empty" id="preset-empty">No saved presets</div>
+                            </div>
+                        </div>
+
+                        <button class="preset-save-btn" id="preset-save-btn" title="Save current search as preset">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                <polyline points="17 21 17 13 7 13 7 21" />
+                                <polyline points="7 3 7 8 15 8" />
+                            </svg>
+                        </button>
+
                         <button class="btn-search" id="btn-search">Search</button>
                     </div>
 
