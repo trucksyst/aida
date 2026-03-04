@@ -412,7 +412,7 @@ background/auth/
 {
   origin:    { city: 'Chicago', state: 'IL', zip: '60601' },
   radius:    10,         // miles
-  equipment: 'VAN',      // см. таблицу Equipment Types ниже
+  equipment: ['VAN', 'REEFER'],  // массив — мульти-выбор, см. таблицу Equipment Types ниже
   dateFrom:  '2026-03-01',
   dateTo:    '2026-03-03'
 }
@@ -437,6 +437,16 @@ background/auth/
 | 13 | AUTOCARRIER | AC | Автовоз |
 | 14 | LANDOLL | LA | Drop Deck Landoll |
 | 15 | MAXI | MX | Flatbed Maxi (двойная платформа) |
+
+### Equipment Multi-Select UI
+
+- Кастомный dropdown с чекбоксами (заменяет стандартный `<select>`)
+- В списке: `Van (V)`, `Flatbed (F)`, `Lowboy (LB)`, `RGN (RG)`...
+- Кнопка **Apply** внизу списка
+- После Apply в поле поиска отображать коды: `(LB),(RG),(DD)`
+- `params.equipment` — массив: `['LOWBOY', 'RGN', 'DOUBLEDROP']`
+- DAT: собирает все types в один массив `{ types: ['LB','LO','LR','RG','DD'] }`
+- Truckstop/TruckerPath: массив названий в шаблон запроса
 
 
 ---

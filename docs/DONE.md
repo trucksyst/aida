@@ -51,8 +51,10 @@
 
 ### TODO (не реализовано)
 - Login popup открывается как отдельное окно. Можно переделать на вкладку в том же окне (`chrome.tabs.create({ windowId })` вместо `chrome.windows.create`)
-- Equipment dropdown в UI — добавить все 15 типов (сейчас 3)
-- EQUIPMENT_MAP в dat-adapter — добавить маппинг для 12 новых типов
+- ~~Equipment dropdown в UI — добавить все 15 типов (сейчас 3)~~ ✅
+- ~~EQUIPMENT_MAP в dat-adapter — маппинг для 15 типов (classes + types)~~ ✅
+- ~~Truckstop adapter — equipment patching в шаблоне~~ ✅
+- Equipment multi-select: чекбоксы + Apply + коды в поле + params.equipment как массив — IN PROGRESS
 
 ---
 
