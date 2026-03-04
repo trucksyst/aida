@@ -33,7 +33,9 @@
     "https://loadboard.truckerpath.com/*",
     "https://api.truckerpath.com/*",
     "https://api.retellai.com/*",
-    "https://nominatim.openstreetmap.org/*"
+    "https://nominatim.openstreetmap.org/*",
+    "https://router.project-osrm.org/*",
+    "https://tile.openstreetmap.org/*"
   ],
   "content_scripts": [
     {

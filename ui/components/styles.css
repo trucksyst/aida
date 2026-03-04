@@ -77,6 +77,13 @@
     padding: 0;
 }
 
+input,
+select,
+button,
+textarea {
+    font-family: inherit;
+}
+
 html,
 body {
     height: 100%;
@@ -126,10 +133,14 @@ body {
     color: var(--text-secondary);
     cursor: pointer;
     transition: background var(--transition), color var(--transition);
-    font-size: 18px;
     position: relative;
     border: none;
     background: none;
+}
+
+.sidebar-icon svg {
+    display: block;
+    flex-shrink: 0;
 }
 
 .sidebar-icon:hover {
@@ -170,12 +181,18 @@ body {
 
 /* ----- Main content ----- */
 
+#content-wrap {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
 #content {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    position: relative;
+    min-width: 0;
 }
 
 /* ----- Search Panel ----- */
@@ -242,6 +259,11 @@ body {
     width: 50px;
 }
 
+.field-state input,
+.field-dest-st input {
+    text-transform: uppercase;
+}
+
 /* Origin/Destination autocomplete (City, ST and zones) */
 .wrap-autocomplete {
     position: relative;
@@ -298,17 +320,18 @@ body {
 }
 
 .equip-display {
-    background: var(--bg-secondary);
+    background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 5px 8px;
-    font-size: 12px;
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--text-primary);
-    min-height: 18px;
+    height: 28px;
+    line-height: 20px;
     user-select: none;
 }
 
@@ -361,6 +384,12 @@ body {
 .search-field.field-date input {
     width: 150px;
     min-width: 150px;
+    font-family: inherit;
+    color-scheme: dark;
+}
+
+[data-theme="light"] .search-field.field-date input {
+    color-scheme: light;
 }
 
 .search-divider {
@@ -665,7 +694,7 @@ body {
 }
 
 .table-empty .icon {
-    font-size: 32px;
+    color: var(--text-muted);
 }
 
 .table-empty .msg {
@@ -824,23 +853,20 @@ body {
 /* ----- Detail Panel ----- */
 
 #detail-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: var(--detail-width);
+    width: 0;
+    min-width: 0;
     height: 100%;
     background: var(--bg-secondary);
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 200ms ease;
-    z-index: 5;
     overflow: hidden;
+    transition: width 200ms ease, min-width 200ms ease;
 }
 
 #detail-panel.open {
-    transform: translateX(0);
+    width: var(--detail-width);
+    min-width: var(--detail-width);
 }
 
 .detail-header {
@@ -921,6 +947,24 @@ body {
 .detail-row .value {
     color: var(--text-primary);
     font-weight: 500;
+    text-align: right;
+    max-width: 60%;
+    word-break: break-word;
+}
+
+
+
+.detail-rate-wrap {
+    margin-top: 4px;
+}
+
+.detail-link {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.detail-link:hover {
+    text-decoration: underline;
 }
 
 .detail-route {
@@ -951,40 +995,19 @@ body {
 .btn {
     flex: 1;
     padding: 8px 12px;
-    border: none;
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
     font-weight: 600;
     cursor: pointer;
-    transition: background var(--transition);
-}
-
-.btn-call {
-    background: var(--success);
-    color: #fff;
-}
-
-.btn-email {
-    background: var(--accent);
-    color: #fff;
-}
-
-.btn-save {
+    transition: background var(--transition), border-color var(--transition);
     background: var(--bg-tertiary);
     color: var(--text-primary);
-    border: 1px solid var(--border);
 }
 
-.btn-call:hover {
-    background: #3ab856;
-}
-
-.btn-email:hover {
-    background: var(--accent-hover);
-}
-
-.btn-save:hover {
+.btn:hover {
     background: var(--bg-hover);
+    border-color: var(--border-light);
 }
 
 .btn:disabled {
@@ -992,19 +1015,18 @@ body {
     cursor: not-allowed;
 }
 
-/* Map placeholder */
-.map-placeholder {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+/* Detail map */
+.detail-map {
+    width: 100%;
+    height: 160px;
     border-radius: var(--radius-md);
-    height: 140px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
+    overflow: hidden;
     margin-bottom: 16px;
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
 }
+
+
 
 /* ============================================================
    Sections (История, Закладки, Агент, Настройки)

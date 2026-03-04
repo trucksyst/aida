@@ -705,8 +705,16 @@ function openDetail(load) {
     document.getElementById('detail-title').textContent =
         `${load.origin?.city}, ${load.origin?.state} → ${load.destination?.city}, ${load.destination?.state}`;
 
+    // Рендерим контент (карта остаётся как HTML-элемент)
     const body = document.getElementById('detail-body');
-    body.innerHTML = renderDetailContent(load);
+    const mapEl = document.getElementById('detail-map');
+    // Очищаем всё кроме карты, потом вставляем после неё
+    const contentDiv = body.querySelector('.detail-content');
+    if (contentDiv) contentDiv.remove();
+    const wrapper = document.createElement('div');
+    wrapper.className = 'detail-content';
+    wrapper.innerHTML = renderDetailContent(load);
+    body.appendChild(wrapper);
 
     // Подсвечиваем строку
     document.querySelectorAll('#loads-tbody tr').forEach(tr => {
@@ -719,9 +727,12 @@ function openDetail(load) {
     document.getElementById('detail-btn-call').disabled = !hasPh;
     document.getElementById('detail-btn-email').disabled = !hasEm;
     document.getElementById('detail-btn-save').textContent =
-        load.status === 'saved' ? '🔖 Saved' : '🔖 Save';
+        load.status === 'saved' ? 'Saved' : 'Save';
 
     document.getElementById('detail-panel').classList.add('open');
+
+    // Инициализируем карту после открытия (нужно чтобы контейнер был видим)
+    setTimeout(() => initDetailMap(load), 250);
 }
 
 function closeDetail() {
@@ -737,15 +748,29 @@ function renderDetailContent(load) {
     const rpm = load.rpm ? `$${load.rpm}/mi` : '';
 
     return `
-    <div class="map-placeholder">🗺 ${esc(origin)} → ${esc(dest)}</div>
-
     <div class="detail-section">
         <h3>Route</h3>
         <div class="detail-route">${esc(origin)} → ${esc(dest)}</div>
-        <div style="margin-top:4px">
+        ${rate !== '—' ? `<div class="detail-rate-wrap">
             <span class="detail-rate-big">${rate}</span>
             <span class="detail-rate-rpm">${rpm}</span>
-        </div>
+        </div>` : ''}
+    </div>
+
+    <div class="detail-section">
+        <h3>Broker</h3>
+        ${detailRow('Company', load.broker?.company || '—')}
+        ${detailRow('Phone', load.broker?.phone
+        ? `<a href="tel:${load.broker.phone}" class="detail-link">${load.broker.phone}${load.broker.phoneExt ? ' x' + load.broker.phoneExt : ''}</a>`
+        : '—')}
+        ${detailRow('Email', load.broker?.email
+            ? `<a href="mailto:${load.broker.email}" class="detail-link">${load.broker.email}</a>`
+            : '—')}
+        ${load.broker?.mc ? detailRow('MC#', load.broker.mc) : ''}
+        ${load.broker?.dot ? detailRow('DOT#', load.broker.dot) : ''}
+        ${load.broker?.rating != null
+            ? detailRow('Credit', `${load.broker.rating}${load.broker.daysToPay ? ' / ' + load.broker.daysToPay + ' days' : ''}`)
+            : ''}
     </div>
 
     <div class="detail-section">
@@ -758,23 +783,7 @@ function renderDetailContent(load) {
         ${detailRow('Full/Partial', load.fullPartial || '—')}
         ${detailRow('Pickup date', load.pickupDate || '—')}
         ${detailRow('Board', (load.board || '').toUpperCase())}
-        ${detailRow('Notes', (load.notes && load.notes.trim()) ? esc(load.notes.trim()).replace(/\n/g, '<br>') : '—')}
-    </div>
-
-    <div class="detail-section">
-        <h3>Broker</h3>
-        ${detailRow('Company', load.broker?.company || '—')}
-        ${detailRow('Phone', load.broker?.phone
-        ? `<a href="tel:${load.broker.phone}" style="color:var(--accent)">${load.broker.phone}${load.broker.phoneExt ? ' x' + load.broker.phoneExt : ''}</a>`
-        : '—')}
-        ${detailRow('Email', load.broker?.email
-            ? `<a href="mailto:${load.broker.email}" style="color:var(--accent)">${load.broker.email}</a>`
-            : '—')}
-        ${load.broker?.mc ? detailRow('MC#', load.broker.mc) : ''}
-        ${load.broker?.dot ? detailRow('DOT#', load.broker.dot) : ''}
-        ${load.broker?.rating != null
-            ? detailRow('Credit', `${load.broker.rating}${load.broker.daysToPay ? ' / ' + load.broker.daysToPay + ' days' : ''}`)
-            : ''}
+        ${(load.notes && load.notes.trim()) ? detailRow('Notes', esc(load.notes.trim()).replace(/\\n/g, '<br>')) : ''}
     </div>
 
     <div class="detail-section">
@@ -789,12 +798,94 @@ function detailRow(label, value) {
 }
 
 // ============================================================
+// Detail Map (Leaflet + OSRM)
+// ============================================================
+
+let detailMap = null;
+let routeLayer = null;
+
+function initDetailMap(load) {
+    const mapEl = document.getElementById('detail-map');
+    if (!mapEl) return;
+
+    const oLat = load.origin?.lat;
+    const oLng = load.origin?.lng;
+    const dLat = load.destination?.lat;
+    const dLng = load.destination?.lng;
+
+    // Нет координат — скрываем карту
+    if (!oLat || !oLng || !dLat || !dLng) {
+        mapEl.style.display = 'none';
+        return;
+    }
+    mapEl.style.display = '';
+
+    // Уничтожаем предыдущую карту
+    if (detailMap) {
+        detailMap.remove();
+        detailMap = null;
+        routeLayer = null;
+    }
+
+    // Создаём карту
+    detailMap = L.map(mapEl, {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        touchZoom: false,
+    });
+
+    // OSM тайлы
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+    }).addTo(detailMap);
+
+    const markerStyle = {
+        radius: 5, color: '#1f6feb', fillColor: '#1f6feb', fillOpacity: 1, weight: 2,
+    };
+    L.circleMarker([oLat, oLng], markerStyle).addTo(detailMap);
+    L.circleMarker([dLat, dLng], markerStyle).addTo(detailMap);
+
+    // Fit bounds с padding
+    const bounds = L.latLngBounds([oLat, oLng], [dLat, dLng]);
+    detailMap.fitBounds(bounds, { padding: [20, 20] });
+
+    // Загружаем маршрут через OSRM
+    fetchOSRMRoute(oLng, oLat, dLng, dLat).then(coords => {
+        if (coords && detailMap) {
+            routeLayer = L.polyline(coords, {
+                color: '#1f6feb',
+                weight: 3,
+                opacity: 0.8,
+            }).addTo(detailMap);
+            detailMap.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+        }
+    }).catch(err => {
+        console.warn('[AIDA] OSRM route fetch failed:', err);
+    });
+}
+
+async function fetchOSRMRoute(lng1, lat1, lng2, lat2) {
+    const url = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.code !== 'Ok' || !data.routes?.[0]) return null;
+    // GeoJSON coordinates [lng, lat] → Leaflet [lat, lng]
+    return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+}
+
+// ============================================================
 // Actions
 // ============================================================
 
 async function doCall(loadId) {
     document.getElementById('detail-btn-call').disabled = true;
-    document.getElementById('detail-btn-call').textContent = '📞 Calling...';
+    document.getElementById('detail-btn-call').textContent = 'Calling...';
 
     const resp = await sendToCore('CALL_BROKER', { loadId });
 
@@ -817,7 +908,7 @@ async function doCall(loadId) {
     }
 
     document.getElementById('detail-btn-call').disabled = false;
-    document.getElementById('detail-btn-call').textContent = '📞 Call';
+    document.getElementById('detail-btn-call').textContent = 'Call';
 }
 
 async function doEmail(loadId) {
@@ -839,7 +930,7 @@ async function doSave(loadId) {
     const resp = await sendToCore('SAVE_BOOKMARK', { loadId });
     if (resp?.ok) {
         showToast('Load saved to bookmarks');
-        document.getElementById('detail-btn-save').textContent = '🔖 Saved';
+        document.getElementById('detail-btn-save').textContent = 'Saved';
 
         // Обновляем статус в таблице
         const load = state.loads.find(l => l.id === loadId);
@@ -860,7 +951,7 @@ async function loadAndRenderBookmarks() {
 function renderBookmarks() {
     const body = document.getElementById('bookmarks-body');
     if (state.bookmarks.length === 0) {
-        body.innerHTML = '<div class="table-empty"><div class="icon">🔖</div><div class="msg">No bookmarks</div></div>';
+        body.innerHTML = '<div class="table-empty"><div class="icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></div><div class="msg">No bookmarks</div></div>';
         return;
     }
     body.innerHTML = state.bookmarks.map(load => renderCallCard(load, 'bookmarks')).join('');
@@ -886,7 +977,7 @@ async function loadAndRenderHistory() {
 function renderHistory() {
     const body = document.getElementById('history-body');
     if (state.history.length === 0) {
-        body.innerHTML = '<div class="table-empty"><div class="icon">📞</div><div class="msg">History empty</div></div>';
+        body.innerHTML = '<div class="table-empty"><div class="icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div class="msg">History empty</div></div>';
         return;
     }
     body.innerHTML = state.history.map(entry => renderHistoryCard(entry)).join('');
