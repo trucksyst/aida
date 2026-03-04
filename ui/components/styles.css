@@ -1057,7 +1057,9 @@ body {
 }
 
 .detail-header {
-    padding: 12px 16px;
+    height: var(--search-height);
+    min-height: var(--search-height);
+    padding: 0 16px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
