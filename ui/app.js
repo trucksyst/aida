@@ -350,12 +350,15 @@ function initEquipMultiSelect() {
     const display = document.getElementById('equip-display');
     const dropdown = document.getElementById('equip-dropdown');
 
+    // Move dropdown to body so it escapes all overflow:hidden containers
+    document.body.appendChild(dropdown);
+
     display.addEventListener('click', (e) => {
         e.stopPropagation();
         const isOpen = dropdown.classList.toggle('open');
         if (isOpen) {
             const rect = display.getBoundingClientRect();
-            dropdown.style.top = rect.bottom + 2 + 'px';
+            dropdown.style.top = (rect.bottom + 2) + 'px';
             dropdown.style.left = rect.left + 'px';
         }
     });
@@ -367,7 +370,7 @@ function initEquipMultiSelect() {
 
     // Закрыть при клике вне
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#equip-multi')) {
+        if (!e.target.closest('#equip-multi') && !e.target.closest('#equip-dropdown')) {
             dropdown.classList.remove('open');
         }
     });
