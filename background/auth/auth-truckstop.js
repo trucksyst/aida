@@ -263,23 +263,38 @@ const AuthTruckstop = {
 
         if (!token) return null;
 
-        if (meta?.expiresAt) {
+        // Определяем expiresAt: из мета или из JWT
+        const expiresAt = meta?.expiresAt || this._getJwtExpiry(token);
+
+        if (expiresAt) {
             const now = Date.now();
             const refreshThreshold = TS_AUTH_CONFIG.refreshBeforeExpirySec * 1000;
 
-            if (now >= meta.expiresAt) {
+            if (now >= expiresAt) {
                 // Токен истёк — пробуем silent refresh
                 console.log('[AIDA/Auth/TS] Token expired, attempting silent refresh');
                 const result = await this.silentRefresh();
                 if (result.ok) return result.token;
+                // Refresh не удался — удаляем мёртвый токен
+                await this.disconnect();
                 return null;
             }
 
-            if (now >= meta.expiresAt - refreshThreshold) {
+            if (now >= expiresAt - refreshThreshold) {
                 // Токен скоро истечёт — обновляем в фоне (не блокируем)
                 console.log('[AIDA/Auth/TS] Token expiring soon, refreshing in background');
                 this.silentRefresh().catch(console.warn);
             }
+
+            // Если мета нет — создаём её (миграция старого токена)
+            if (!meta) {
+                this._saveToken(token, 'migrated').catch(console.warn);
+            }
+        } else {
+            // Не можем определить expiry — токен невалидный, удаляем
+            console.warn('[AIDA/Auth/TS] Token without expiry info, removing');
+            await this.disconnect();
+            return null;
         }
 
         return token;
@@ -287,6 +302,7 @@ const AuthTruckstop = {
 
     /**
      * Статус подключения.
+     * Проверяет expiry из мета И из JWT (для старых токенов без мета).
      */
     async getStatus() {
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
@@ -295,7 +311,15 @@ const AuthTruckstop = {
 
         if (!token) return 'disconnected';
 
-        if (meta?.expiresAt && Date.now() >= meta.expiresAt) {
+        // Проверяем expiry: из мета или из JWT напрямую
+        const expiresAt = meta?.expiresAt || this._getJwtExpiry(token);
+
+        if (expiresAt && Date.now() >= expiresAt) {
+            return 'expired';
+        }
+
+        // Нет ни мета ни exp в JWT — токен невалиден
+        if (!expiresAt) {
             return 'expired';
         }
 
@@ -390,6 +414,26 @@ const AuthTruckstop = {
         });
 
         console.log(`[AIDA/Auth/TS] Token saved (source: ${source}, expires in ${Math.round((expiresAt - Date.now()) / 1000)}s)`);
+    },
+
+    /**
+     * Парсинг JWT для получения expiry (ms).
+     * Универсальный fallback для токенов без мета-данных.
+     */
+    _getJwtExpiry(token) {
+        try {
+            const parts = token.split('.');
+            if (parts.length < 2) return null;
+            const payload = JSON.parse(atob(parts[1]));
+            if (payload.exp) return payload.exp * 1000;
+            // Если в claims есть expires
+            if (payload.claims?.expires) {
+                return new Date(payload.claims.expires).getTime() || null;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
     },
 
     /**
