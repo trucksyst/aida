@@ -198,7 +198,7 @@ const AuthManager = {
             console.log(`[AIDA/Auth] Auto-resolving auth for: ${board} (${error?.code})`);
             const module = AUTH_MODULES[board];
 
-            // Борды без auth-модуля (Truckstop, TP) — НЕ открываем popup автоматически.
+            // Борды без auth-модуля (TP) — НЕ открываем popup автоматически.
             // Popup для них только при ручном клике юзера на кнопку.
             if (!module) {
                 console.log(`[AIDA/Auth] Skipping ${board} — no auth module (auto-popup disabled)`);

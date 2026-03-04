@@ -544,13 +544,13 @@ async function searchLoads(params) {
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
     const disabled = settings.disabledBoards || {};
 
-    // Отключённые борды и борды без настройки не участвуют в поиске.
-    // DAT — всегда запускается (у него есть auth-модуль с auto-login).
-    // Truckstop — запускается если есть токен (auth-модуль с auto-refresh).
-    // TruckerPath — только если есть шаблон (template).
+    // Отключённые борды не участвуют в поиске.
+    // DAT и Truckstop — всегда запускаются (у них есть auth-модуль с auto-login).
+    //   Если нет токена → адаптер вернёт AUTH_REQUIRED → autoResolve откроет popup.
+    // TruckerPath — только если есть шаблон (template, нет auth-модуля).
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const skipDat = !!disabled.dat;
-    const skipTs = !!disabled.truckstop || !tsToken;
+    const skipTs = !!disabled.truckstop;
     const skipTp = !!disabled.tp || !tpTemplate;
 
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
