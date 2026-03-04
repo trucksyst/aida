@@ -363,6 +363,8 @@ function presetLabel(p) {
     if (p.dest) {
         lbl += ' → ' + p.dest;
         if (p.destState) lbl += ' ' + p.destState;
+    } else {
+        lbl += ' → Anywhere';
     }
     if (p.radius != null) lbl += '  ' + p.radius;
     if (p.equipment && p.equipment.length > 0) {

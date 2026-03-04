@@ -417,8 +417,8 @@ body {
     cursor: pointer;
     height: 28px;
     padding: 4px 8px;
-    min-width: 180px;
-    max-width: 280px;
+    min-width: 260px;
+    max-width: 400px;
     transition: border-color var(--transition), background var(--transition);
     user-select: none;
 }
