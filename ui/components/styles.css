@@ -243,25 +243,12 @@ body {
     width: 160px;
 }
 
-.search-field.field-state input {
-    width: 50px;
-}
-
 .search-field.field-radius input {
     width: 55px;
 }
 
 .search-field.field-dest input {
     width: 140px;
-}
-
-.search-field.field-dest-st input {
-    width: 50px;
-}
-
-.field-state input,
-.field-dest-st input {
-    text-transform: uppercase;
 }
 
 /* Origin/Destination autocomplete (City, ST and zones) */

@@ -130,15 +130,32 @@ function setVal(id, val) {
     if (el) el.value = val;
 }
 
+/** Parse "Chicago, IL" → { city: "Chicago", state: "IL" }. Also handles zones: "Z1" → { city: "Z1", state: "" } */
+function parseCityState(raw) {
+    if (!raw) return { city: '', state: '' };
+    var s = raw.trim();
+    // Zone: Z0–Z9
+    if (/^Z\d+$/i.test(s)) return { city: s.toUpperCase(), state: '' };
+    var parts = s.split(/\s*,\s*/);
+    var city = (parts[0] || '').trim();
+    var state = (parts[1] || '').trim().toUpperCase().slice(0, 2);
+    return { city: city, state: state };
+}
+
+/** Format city+state for display in a single field. */
+function formatCityState(city, state) {
+    if (!city && !state) return '';
+    if (!state) return city;
+    return city + ', ' + state;
+}
+
 /** Заполнить форму поиска из сохранённого lastSearch (память по умолчанию). */
 function applyLastSearch(lastSearch) {
     if (!lastSearch || typeof lastSearch !== 'object') return;
     var o = lastSearch.origin || {};
     var d = lastSearch.destination || {};
-    setVal('origin-city', o.city || '');
-    setVal('origin-state', (o.state || '').toUpperCase().slice(0, 2));
-    setVal('dest-city', d.city || '');
-    setVal('dest-state', (d.state || '').toUpperCase().slice(0, 2));
+    setVal('origin-city', formatCityState(o.city || '', (o.state || '').toUpperCase().slice(0, 2)));
+    setVal('dest-city', formatCityState(d.city || '', (d.state || '').toUpperCase().slice(0, 2)));
     setVal('search-radius', lastSearch.radius != null ? lastSearch.radius : 50);
     if (lastSearch.equipment) {
         const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
@@ -193,11 +210,10 @@ function onDataUpdated(message) {
 // Location autocomplete (City, ST and zones Z0–Z9)
 // ============================================================
 
-function attachLocationAutocomplete(cityId, stateId, dropdownId) {
+function attachLocationAutocomplete(cityId, dropdownId) {
     var cityEl = document.getElementById(cityId);
-    var stateEl = document.getElementById(stateId);
     var listEl = document.getElementById(dropdownId);
-    if (!cityEl || !stateEl || !listEl || typeof window.AIDALocations === 'undefined') return;
+    if (!cityEl || !listEl || typeof window.AIDALocations === 'undefined') return;
 
     var debounceTimer = null;
     var DEBOUNCE_MS = 150;
@@ -229,14 +245,8 @@ function attachLocationAutocomplete(cityId, stateId, dropdownId) {
             node.addEventListener('click', function () {
                 var val = node.getAttribute('data-value');
                 var typ = node.getAttribute('data-type');
-                if (typ === 'zone') {
-                    cityEl.value = val;
-                    stateEl.value = '';
-                } else {
-                    var parts = val.split(/\s*,\s*/);
-                    cityEl.value = (parts[0] || '').trim();
-                    stateEl.value = (parts[1] || '').trim().toUpperCase().slice(0, 2);
-                }
+                // Value is already in "City, ST" or "Z1" format — set as-is
+                cityEl.value = val;
                 hide();
                 cityEl.focus();
                 if (typeof updatePresetDisplay === 'function') updatePresetDisplay();
@@ -355,14 +365,12 @@ function initEquipMultiSelect() {
 // Search Presets — save / load / delete / apply
 // ============================================================
 
-/** Build a human-readable label from preset data: "Chicago IL → Dallas TX  50  (V)(R)" */
+/** Build a human-readable label: "Chicago, IL → Dallas, TX  50  (V)(R)" */
 function presetLabel(p) {
     let lbl = '';
-    if (p.origin) lbl += p.origin;
-    if (p.originState) lbl += ' ' + p.originState;
+    if (p.origin) lbl += p.origin;  // already "Chicago, IL" format
     if (p.dest) {
         lbl += ' → ' + p.dest;
-        if (p.destState) lbl += ' ' + p.destState;
     } else {
         lbl += ' → Anywhere';
     }
@@ -404,11 +412,9 @@ async function savePresetsToStorage() {
 function buildPresetFromForm() {
     return {
         id: String(Date.now()),
-        origin: document.getElementById('origin-city').value.trim(),
-        originState: document.getElementById('origin-state').value.trim().toUpperCase(),
+        origin: document.getElementById('origin-city').value.trim(),  // "Chicago, IL" combined
         radius: parseInt(document.getElementById('search-radius').value) || 50,
-        dest: document.getElementById('dest-city').value.trim(),
-        destState: document.getElementById('dest-state').value.trim().toUpperCase(),
+        dest: document.getElementById('dest-city').value.trim(),      // "Dallas, TX" combined
         equipment: getSelectedEquipment()
     };
 }
@@ -417,9 +423,7 @@ function buildPresetFromForm() {
 function presetExists(p) {
     return state.searchPresets.some(x =>
         x.origin === p.origin &&
-        x.originState === p.originState &&
         x.dest === p.dest &&
-        x.destState === p.destState &&
         x.radius === p.radius &&
         JSON.stringify(x.equipment.slice().sort()) === JSON.stringify(p.equipment.slice().sort())
     );
@@ -428,7 +432,7 @@ function presetExists(p) {
 /** Handle Save preset button click. */
 async function handlePresetSave() {
     const p = buildPresetFromForm();
-    if (!p.origin && !p.originState) {
+    if (!p.origin) {
         showToast('Fill in at least origin to save', 'error');
         return;
     }
@@ -454,10 +458,8 @@ function applyPreset(presetId) {
     const p = state.searchPresets.find(x => x.id === presetId);
     if (!p) return;
     setVal('origin-city', p.origin || '');
-    setVal('origin-state', p.originState || '');
     setVal('search-radius', p.radius != null ? p.radius : 50);
     setVal('dest-city', p.dest || '');
-    setVal('dest-state', p.destState || '');
     if (p.equipment) setEquipmentChecked(p.equipment);
 
     // Даты: today и today+1
@@ -542,7 +544,7 @@ function updatePresetDisplay() {
     const p = buildPresetFromForm();
     const lbl = presetLabel(p);
 
-    if (!p.origin && !p.originState) {
+    if (!p.origin) {
         textEl.textContent = 'Select or type params…';
         textEl.classList.add('placeholder');
     } else {
@@ -585,7 +587,7 @@ function initSearchPresets() {
     });
 
     // Live preview: update display on any search field change
-    ['origin-city', 'origin-state', 'search-radius', 'dest-city', 'dest-state'].forEach(id => {
+    ['origin-city', 'search-radius', 'dest-city'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('input', updatePresetDisplay);
@@ -607,8 +609,8 @@ function initSearchPresets() {
 // ============================================================
 
 function bindEvents() {
-    attachLocationAutocomplete('origin-city', 'origin-state', 'origin-autocomplete');
-    attachLocationAutocomplete('dest-city', 'dest-state', 'dest-autocomplete');
+    attachLocationAutocomplete('origin-city', 'origin-autocomplete');
+    attachLocationAutocomplete('dest-city', 'dest-autocomplete');
     initEquipMultiSelect();
     initSearchPresets();
 
@@ -624,7 +626,7 @@ function bindEvents() {
     document.getElementById('btn-search').addEventListener('click', doSearch);
 
     // State input — Enter
-    ['origin-city', 'origin-state', 'dest-city', 'dest-state', 'search-radius',
+    ['origin-city', 'dest-city', 'search-radius',
         'date-from', 'date-to'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
@@ -727,11 +729,10 @@ function switchSection(section) {
  * Даты: сегодня. Equipment: Van.
  */
 function ensureSearchParamsAndSearch() {
-    const originCity = (document.getElementById('origin-city')?.value || '').trim();
-    const originState = (document.getElementById('origin-state')?.value || '').trim();
+    const originRaw = (document.getElementById('origin-city')?.value || '').trim();
 
     // Если форма уже заполнена — просто поиск
-    if (originCity || originState) {
+    if (originRaw) {
         setTimeout(() => doSearch(), 300);
         return;
     }
@@ -749,12 +750,10 @@ function ensureSearchParamsAndSearch() {
     const compCity = user.city || user.companyCity || '';
     const compState = user.state || user.companyState || '';
     if (compCity || compState) {
-        setVal('origin-city', compCity);
-        setVal('origin-state', (compState || '').toUpperCase().slice(0, 2));
+        setVal('origin-city', formatCityState(compCity, (compState || '').toUpperCase().slice(0, 2)));
     } else {
         // Дефолт: Chicago, IL
-        setVal('origin-city', 'Chicago');
-        setVal('origin-state', 'IL');
+        setVal('origin-city', 'Chicago, IL');
     }
 
     // Даты: сегодня
@@ -826,14 +825,16 @@ async function doSearch() {
 }
 
 function getSearchParams() {
+    const originParsed = parseCityState(document.getElementById('origin-city').value);
+    const destParsed = parseCityState(document.getElementById('dest-city').value);
     return {
         origin: {
-            city: document.getElementById('origin-city').value.trim(),
-            state: document.getElementById('origin-state').value.trim().toUpperCase()
+            city: originParsed.city,
+            state: originParsed.state
         },
         destination: {
-            city: document.getElementById('dest-city').value.trim(),
-            state: document.getElementById('dest-state').value.trim().toUpperCase()
+            city: destParsed.city,
+            state: destParsed.state
         },
         radius: parseInt(document.getElementById('search-radius').value) || 50,
         equipment: getSelectedEquipment(),
