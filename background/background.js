@@ -157,6 +157,20 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 });
 
+// При закрытии AIDA таба → очистить грузы
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+    try {
+        // Проверяем остались ли ещё открытые AIDA табы
+        const aidaTabs = await chrome.tabs.query({ url: AIDA_UI_URL + '*' });
+        if (aidaTabs.length === 0) {
+            await Storage.setLoads([]);
+            console.log('[AIDA/Core] AIDA tab closed — loads cleared');
+        }
+    } catch (e) {
+        // Tab query может упасть если браузер закрывается
+    }
+});
+
 // ============================================================
 // Message Router
 // ============================================================
@@ -243,6 +257,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'GET_HISTORY':
             Storage.getHistory(message.filters || {}).then(history => sendResponse({ history }));
+            return true;
+
+        case 'CLEAR_LOADS':
+            Storage.setLoads([]).then(() => {
+                console.log('[AIDA/Core] Loads cleared');
+                sendResponse({ ok: true });
+            }).catch(err => sendResponse({ error: err.message }));
             return true;
 
         case 'GET_SETTINGS':

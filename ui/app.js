@@ -60,21 +60,23 @@ async function init() {
         applySettings(resp.settings);
     }
 
-    const loadsResp = await sendToCore('GET_LOADS');
-    const loadCount = Array.isArray(loadsResp?.loads) ? loadsResp.loads.length : 0;
-    console.log('[AIDA/UI] Step: GET_LOADS →', loadCount, 'loads');
-    state.loads = Array.isArray(loadsResp?.loads) ? loadsResp.loads : [];
+    // Очищаем старые грузы при открытии — каждый раз чистый старт
+    await sendToCore('CLEAR_LOADS');
+    state.loads = [];
+    console.log('[AIDA/UI] Step: cleared old loads');
 
-    // Даты по умолчанию, если нет сохранённого поиска
+    // Даты по умолчанию — сегодня
     const today = new Date().toISOString().split('T')[0];
-    const in3days = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
     document.getElementById('date-from').value = today;
-    document.getElementById('date-to').value = in3days;
+    document.getElementById('date-to').value = today;
 
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
     if (resp?.settings?.lastSearch) {
         applyLastSearch(resp.settings.lastSearch);
-        console.log('[AIDA/UI] Step: applied last search (origin, destination, dates, etc.)');
+        // Даты всегда перебиваем на сегодня
+        document.getElementById('date-from').value = today;
+        document.getElementById('date-to').value = today;
+        console.log('[AIDA/UI] Step: applied last search (origin, destination, equipment)');
     }
 
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
