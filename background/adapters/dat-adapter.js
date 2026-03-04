@@ -276,7 +276,21 @@ async function getLocationSuggestion(token, lookupTerm) {
  * originPlace/destPlace — результат getLocationSuggestion (с latitude, longitude, placeId); без них API возвращает 400.
  */
 function buildGraphQLRequest(params, originPlace, destPlace) {
-    const eqEntry = EQUIPMENT_MAP[params.equipment] || { classes: ['V'] };
+    // Equipment: params.equipment может быть строка или массив
+    const eqList = Array.isArray(params.equipment) ? params.equipment : [params.equipment || 'VAN'];
+    const allClasses = new Set();
+    const allTypes = new Set();
+    for (const eq of eqList) {
+        const entry = EQUIPMENT_MAP[eq];
+        if (!entry) { allClasses.add('V'); continue; }
+        if (entry.classes) entry.classes.forEach(c => allClasses.add(c));
+        if (entry.types) entry.types.forEach(t => allTypes.add(t));
+    }
+    const equipmentFilter = {};
+    if (allClasses.size > 0) equipmentFilter.classes = [...allClasses];
+    if (allTypes.size > 0) equipmentFilter.types = [...allTypes];
+    if (!equipmentFilter.classes && !equipmentFilter.types) equipmentFilter.classes = ['V'];
+
     const maxOriginMiles = Math.min(Number(params.radius) || 50, 500);
     const maxDestMiles = 150;
 
@@ -310,7 +324,7 @@ function buildGraphQLRequest(params, originPlace, destPlace) {
             },
             destination: destPlaceObj ? { place: destPlaceObj } : { open: true }
         },
-        equipment: eqEntry.classes ? { classes: eqEntry.classes } : { types: eqEntry.types },
+        equipment: equipmentFilter,
         filters: {
             excludePostingIds: [],
             includeOnlyBookable: false,

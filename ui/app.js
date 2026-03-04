@@ -135,8 +135,8 @@ function applyLastSearch(lastSearch) {
     setVal('dest-state', (d.state || '').toUpperCase().slice(0, 2));
     setVal('search-radius', lastSearch.radius != null ? lastSearch.radius : 50);
     if (lastSearch.equipment) {
-        var eqEl = document.getElementById('equipment');
-        if (eqEl && ['VAN', 'REEFER', 'FLATBED'].indexOf(lastSearch.equipment) !== -1) eqEl.value = lastSearch.equipment;
+        const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
+        setEquipmentChecked(eqArr);
     }
     if (lastSearch.dateFrom) setVal('date-from', lastSearch.dateFrom);
     if (lastSearch.dateTo) setVal('date-to', lastSearch.dateTo);
@@ -292,12 +292,68 @@ function attachLocationAutocomplete(cityId, stateId, dropdownId) {
 }
 
 // ============================================================
+// Equipment Multi-Select
+// ============================================================
+
+const EQUIP_SHORT = {
+    'VAN': 'V', 'REEFER': 'R', 'FLATBED': 'F', 'STEPDECK': 'SD',
+    'DOUBLEDROP': 'DD', 'LOWBOY': 'LB', 'RGN': 'RG', 'HOPPER': 'HB',
+    'TANKER': 'T', 'POWERONLY': 'PO', 'CONTAINER': 'C', 'DUMP': 'DT',
+    'AUTOCARRIER': 'AC', 'LANDOLL': 'LA', 'MAXI': 'MX'
+};
+
+function getSelectedEquipment() {
+    const checks = document.querySelectorAll('#equip-dropdown input[type="checkbox"]:checked');
+    const arr = Array.from(checks).map(cb => cb.value);
+    return arr.length > 0 ? arr : ['VAN'];
+}
+
+function setEquipmentChecked(values) {
+    const all = document.querySelectorAll('#equip-dropdown input[type="checkbox"]');
+    all.forEach(cb => { cb.checked = values.includes(cb.value); });
+    updateEquipDisplay();
+}
+
+function updateEquipDisplay() {
+    const selected = getSelectedEquipment();
+    const codes = selected.map(v => '(' + (EQUIP_SHORT[v] || v) + ')');
+    document.getElementById('equip-display').textContent = codes.join(',');
+}
+
+function initEquipMultiSelect() {
+    const display = document.getElementById('equip-display');
+    const dropdown = document.getElementById('equip-dropdown');
+    const applyBtn = document.getElementById('equip-apply');
+
+    display.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('open');
+    });
+
+    applyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        updateEquipDisplay();
+        dropdown.classList.remove('open');
+    });
+
+    // Закрыть при клике вне
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#equip-multi')) {
+            dropdown.classList.remove('open');
+        }
+    });
+
+    updateEquipDisplay();
+}
+
+// ============================================================
 // Events
 // ============================================================
 
 function bindEvents() {
     attachLocationAutocomplete('origin-city', 'origin-state', 'origin-autocomplete');
     attachLocationAutocomplete('dest-city', 'dest-state', 'dest-autocomplete');
+    initEquipMultiSelect();
 
     // Sidebar navigation
     document.querySelectorAll('.sidebar-icon[data-section]').forEach(btn => {
@@ -450,8 +506,7 @@ function ensureSearchParamsAndSearch() {
     setVal('date-to', today);
 
     // Equipment: Van
-    const eqEl = document.getElementById('equipment');
-    if (eqEl) eqEl.value = 'Van';
+    setEquipmentChecked(['VAN']);
 
     setTimeout(() => doSearch(), 300);
 }
@@ -524,7 +579,7 @@ function getSearchParams() {
             state: document.getElementById('dest-state').value.trim().toUpperCase()
         },
         radius: parseInt(document.getElementById('search-radius').value) || 50,
-        equipment: document.getElementById('equipment').value,
+        equipment: getSelectedEquipment(),
         dateFrom: document.getElementById('date-from').value,
         dateTo: document.getElementById('date-to').value
     };

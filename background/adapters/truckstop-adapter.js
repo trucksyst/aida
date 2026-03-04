@@ -205,7 +205,7 @@ const TruckstopAdapter = {
                     if (params?.dateFrom) { m.pickup_date_begin = String(params.dateFrom).slice(0, 10); modified = true; }
                     if (params?.dateTo) { m.pickup_date_end = String(params.dateTo).slice(0, 10); modified = true; }
 
-                    // Equipment
+                    // Equipment (поддержка массива)
                     if (params?.equipment) {
                         const TS_EQUIP = {
                             'VAN': 'Van', 'REEFER': 'Reefer', 'FLATBED': 'Flatbed',
@@ -216,10 +216,15 @@ const TruckstopAdapter = {
                             'DUMP': 'Dump Trailer', 'AUTOCARRIER': 'Auto Carrier',
                             'LANDOLL': 'Landoll', 'MAXI': 'Maxi'
                         };
-                        const tsName = TS_EQUIP[params.equipment] || params.equipment;
+                        const eqArr = Array.isArray(params.equipment) ? params.equipment : [params.equipment];
+                        const tsNames = eqArr.map(e => TS_EQUIP[e] || e);
                         const eqKeys = ['equipmentType', 'equipment_type', 'equipment', 'equipmentCode', 'trailerType'];
                         for (const k of eqKeys) {
-                            if (m[k] !== undefined) { m[k] = tsName; modified = true; }
+                            if (m[k] !== undefined) {
+                                // Если поле было строкой — ставим первое, если массив — весь массив
+                                m[k] = Array.isArray(m[k]) ? tsNames : tsNames[0];
+                                modified = true;
+                            }
                         }
                     }
                     if (modified) {

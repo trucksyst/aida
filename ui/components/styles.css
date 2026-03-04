@@ -292,8 +292,86 @@ body {
     background: transparent;
 }
 
-.search-field.field-equip select {
-    width: 90px;
+.equip-multi {
+    position: relative;
+    width: 110px;
+}
+
+.equip-display {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+    min-height: 18px;
+    user-select: none;
+}
+
+.equip-display:hover {
+    border-color: var(--accent);
+}
+
+.equip-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 999;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    padding: 6px 0;
+    max-height: 280px;
+    overflow-y: auto;
+    min-width: 180px;
+}
+
+.equip-dropdown.open {
+    display: block;
+}
+
+.equip-dropdown label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.equip-dropdown label:hover {
+    background: var(--hover);
+}
+
+.equip-dropdown input[type="checkbox"] {
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.equip-apply-btn {
+    display: block;
+    width: calc(100% - 16px);
+    margin: 6px 8px 4px;
+    padding: 5px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.equip-apply-btn:hover {
+    opacity: 0.85;
 }
 
 .search-field.field-date input {

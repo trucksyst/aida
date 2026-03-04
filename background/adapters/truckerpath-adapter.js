@@ -609,11 +609,15 @@ function patchSearchParams(target, params) {
         }
     }
 
-    // Equipment
+    // Equipment (поддержка массива)
     if (params.equipment) {
+        const eqArr = Array.isArray(params.equipment) ? params.equipment : [params.equipment];
         const equipKeys = ['equipment', 'equipmentType', 'trailer', 'trailerType'];
         for (const k of equipKeys) {
-            if (target[k] !== undefined) { target[k] = params.equipment; modified = true; }
+            if (target[k] !== undefined) {
+                target[k] = Array.isArray(target[k]) ? eqArr : eqArr[0];
+                modified = true;
+            }
         }
     }
 

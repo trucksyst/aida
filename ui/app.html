@@ -90,23 +90,27 @@
 
                     <div class="search-field field-equip">
                         <label>Type</label>
-                        <select id="equipment">
-                            <option value="VAN">Van</option>
-                            <option value="REEFER">Reefer</option>
-                            <option value="FLATBED">Flatbed</option>
-                            <option value="STEPDECK">Step Deck</option>
-                            <option value="DOUBLEDROP">Double Drop</option>
-                            <option value="LOWBOY">Lowboy</option>
-                            <option value="RGN">RGN</option>
-                            <option value="HOPPER">Hopper Bottom</option>
-                            <option value="TANKER">Tanker</option>
-                            <option value="POWERONLY">Power Only</option>
-                            <option value="CONTAINER">Container</option>
-                            <option value="DUMP">Dump Trailer</option>
-                            <option value="AUTOCARRIER">Auto Carrier</option>
-                            <option value="LANDOLL">Landoll</option>
-                            <option value="MAXI">Maxi</option>
-                        </select>
+                        <div class="equip-multi" id="equip-multi">
+                            <div class="equip-display" id="equip-display">(V)</div>
+                            <div class="equip-dropdown" id="equip-dropdown">
+                                <label><input type="checkbox" value="VAN" checked> Van (V)</label>
+                                <label><input type="checkbox" value="REEFER"> Reefer (R)</label>
+                                <label><input type="checkbox" value="FLATBED"> Flatbed (F)</label>
+                                <label><input type="checkbox" value="STEPDECK"> Step Deck (SD)</label>
+                                <label><input type="checkbox" value="DOUBLEDROP"> Double Drop (DD)</label>
+                                <label><input type="checkbox" value="LOWBOY"> Lowboy (LB)</label>
+                                <label><input type="checkbox" value="RGN"> RGN (RG)</label>
+                                <label><input type="checkbox" value="HOPPER"> Hopper Bottom (HB)</label>
+                                <label><input type="checkbox" value="TANKER"> Tanker (T)</label>
+                                <label><input type="checkbox" value="POWERONLY"> Power Only (PO)</label>
+                                <label><input type="checkbox" value="CONTAINER"> Container (C)</label>
+                                <label><input type="checkbox" value="DUMP"> Dump Trailer (DT)</label>
+                                <label><input type="checkbox" value="AUTOCARRIER"> Auto Carrier (AC)</label>
+                                <label><input type="checkbox" value="LANDOLL"> Landoll (LA)</label>
+                                <label><input type="checkbox" value="MAXI"> Maxi (MX)</label>
+                                <button type="button" id="equip-apply" class="equip-apply-btn">Apply</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="search-field field-date">
