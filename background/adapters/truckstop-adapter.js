@@ -491,6 +491,27 @@ const TruckstopAdapter = {
             }
             if (!text || text.trim().charAt(0) === '<') return { ok: true, loads: [], meta: { board: BOARD } };
             const data = JSON.parse(text);
+            // DEBUG: что именно вернул Hasura
+            console.log('[AIDA/Truckstop] _doFetch response keys:', Object.keys(data), 'status:', resp.status,
+                data.errors ? 'ERRORS: ' + JSON.stringify(data.errors).slice(0, 300) : 'no errors');
+
+            // JWT expired → вернуть AUTH_REQUIRED для auto-resolve
+            if (data.errors && !data.data) {
+                const errMsg = data.errors[0]?.message || '';
+                const errCode = data.errors[0]?.extensions?.code || '';
+                if (errCode === 'invalid-jwt' || errMsg.includes('JWTExpired')) {
+                    console.warn('[AIDA/Truckstop] JWT expired — need re-auth');
+                    return {
+                        ok: false, loads: [], meta: { board: BOARD },
+                        error: { code: 'AUTH_REQUIRED', message: 'JWT expired', retriable: true }
+                    };
+                }
+                return {
+                    ok: false, loads: [], meta: { board: BOARD },
+                    error: { code: 'GRAPHQL_ERROR', message: errMsg, retriable: true }
+                };
+            }
+
             const rawResults = findLoadsArray(data, true);
             if (!Array.isArray(rawResults)) return { ok: true, loads: [], meta: { board: BOARD } };
             const loads = normalizeTruckstopResults(rawResults);

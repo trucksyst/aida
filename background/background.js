@@ -619,7 +619,7 @@ async function searchLoads(params) {
                     if (board === 'truckstop' && !disabled.truckstop) {
                         const freshTsToken = await Storage.getToken('truckstop');
                         const freshClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
-                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, truckstopTemplate: tsTemplate, claims: freshClaims });
+                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, claims: freshClaims });
                         tsLoads = retryResult?.loads || [];
                         const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
                         if (idx !== -1) adapterWarnings.splice(idx, 1);
@@ -777,7 +777,19 @@ async function handleTsAutoRefresh() {
     if (!tsToken || !claims) return;
 
     console.log('[AIDA/Core] Truckstop auto-refresh: fetching new loads...');
-    const result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
+    let result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
+
+    // JWT протух → silent refresh → retry
+    if (!result?.ok && result?.error?.code === 'AUTH_REQUIRED') {
+        console.log('[AIDA/Core] TS auto-refresh: JWT expired, trying silent refresh...');
+        const refreshed = await AuthManager.autoResolveAuthErrors([{ board: 'truckstop', error: result.error }]);
+        if (refreshed.resolved?.includes('truckstop')) {
+            const freshToken = await Storage.getToken('truckstop');
+            const freshClaims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
+            result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: freshToken, claims: freshClaims });
+        }
+    }
+
     if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
 
     // Сравниваем по ID — добавляем только новые
