@@ -947,8 +947,14 @@ function renderRow(load) {
     const status = renderStatusBadge(load.status);
     const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
 
+    // Если груз создан < 3 мин назад — подсветка row-new
+    const NEW_THRESHOLD_MS = 3 * 60 * 1000;
+    const postedMs = load.postedAt ? new Date(load.postedAt).getTime() : 0;
+    const isNew = postedMs > 0 && (Date.now() - postedMs) < NEW_THRESHOLD_MS;
+    const rowClass = `status-${load.status || 'active'}${isNew ? ' row-new' : ''}`;
+
     return `
-    <tr data-id="${esc(load.id)}" class="status-${load.status || 'active'}">
+    <tr data-id="${esc(load.id)}" class="${rowClass}">
         <td class="td-rate">${rate}</td>
         <td class="td-rpm">${rpm}</td>
         <td>${esc(load.equipment || '—')}</td>

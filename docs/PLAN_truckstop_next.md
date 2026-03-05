@@ -12,7 +12,10 @@
 - [x] Декодирование JWT claims (v5AccountId, accountUserId, v5AccountUserId)
 - [x] Built-in GraphQL запрос без template (Hasura endpoint + JWT + claims)
 - [x] Сортировка грузов по postedAt (newest first) по умолчанию
-- [x] Template от харвестера — приоритетный fallback если захвачен
+- [x] Отключён `TS_SEARCH_RESPONSE` — грузы с сайта не пропихиваются
+- [x] Auto-refresh каждую минуту (20 свежих грузов через UpdatedOnDesc)
+- [x] Подсветка новых грузов (row-new, еле-синий фон, < 3 мин)
+- [x] Убран template из search() — только built-in GraphQL + JWT
 
 ---
 

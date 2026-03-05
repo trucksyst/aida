@@ -701,6 +701,21 @@ body {
     opacity: 0.7;
 }
 
+/* Новый груз (createdOn < 3 мин) — еле синий фон */
+#load-table tbody tr.row-new {
+    background: rgba(31, 111, 235, 0.08);
+    animation: row-new-fade 180s ease-out forwards;
+}
+
+@keyframes row-new-fade {
+    0% { background: rgba(31, 111, 235, 0.08); }
+    100% { background: transparent; }
+}
+
+[data-theme="light"] #load-table tbody tr.row-new {
+    background: rgba(31, 111, 235, 0.06);
+}
+
 #load-table td {
     padding: 6px 8px;
     vertical-align: middle;

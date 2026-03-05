@@ -750,7 +750,7 @@ function stopLiveQuery() {
 // ============================================================
 
 const TS_REFRESH_ALARM = 'aida-ts-refresh';
-const TS_REFRESH_INTERVAL_MIN = 2; // каждые 2 минуты
+const TS_REFRESH_INTERVAL_MIN = 1; // каждую минуту
 let _tsRefreshParams = null;
 
 function startTsAutoRefresh(searchParams) {

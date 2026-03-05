@@ -327,7 +327,6 @@ const TruckstopAdapter = {
     async search(params, ctx = {}) {
         console.log('[AIDA/Truckstop] Step: search called, params=', JSON.stringify(params || {}).slice(0, 120));
         const token = ctx.token;
-        const template = ctx.truckstopTemplate;
         const claims = ctx.claims;  // { v5AccountId, accountUserId, v5AccountUserId } из JWT
 
         if (!token) {
@@ -337,22 +336,11 @@ const TruckstopAdapter = {
             };
         }
 
-        // Если есть template — использовать его (приоритет). Иначе — built-in GraphQL.
-        if (template && template.url) {
-            if (template.url.indexOf('LoadSearchCount') !== -1 || template.url.indexOf('searchCount') !== -1) {
-                return {
-                    ok: false, loads: [], meta: { board: BOARD },
-                    error: { code: 'WRONG_TEMPLATE', message: 'Saved template is for count, not loads.', retriable: false }
-                };
-            }
-            return this._searchWithTemplate(params, token, template);
-        }
-
-        // Нет template — попробовать built-in GraphQL (нужны claims из JWT)
+        // Built-in GraphQL — нужны claims из JWT
         if (!claims || !claims.v5AccountId) {
             return {
                 ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'NO_TEMPLATE', message: 'Missing JWT claims. Re-login to Truckstop.', retriable: true }
+                error: { code: 'NO_CLAIMS', message: 'Missing JWT claims. Re-login to Truckstop.', retriable: true }
             };
         }
 
