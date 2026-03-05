@@ -101,6 +101,81 @@ fragment GridLoadSearchFields on loads_grid_ret_type {
   __typename
 }`;
 
+/** GraphQL query для auto-refresh: сортировка по updatedOn (свежие первые). */
+const BUILTIN_GRAPHQL_QUERY_UPDATED = `query LoadSearchSortByUpdatedOnDesc($args: get_loads_with_extra_data_sort_by_updated_on_desc_args! = {}, $isPro: Boolean!) {
+  get_loads_with_extra_data_sort_by_updated_on_desc(args: $args) {
+    ...GridLoadSearchFields
+    __typename
+  }
+}
+
+fragment GridLoadSearchFields on loads_grid_ret_type {
+  id
+  modeId
+  modeCode
+  originCity
+  originState
+  originCityState
+  originEarlyTime
+  originLateTime
+  originDeadhead
+  originCountry
+  originZipCode
+  destinationCity
+  destinationState
+  destinationCityState
+  destinationEarlyTime
+  destinationLateTime
+  destinationDeadhead
+  destinationCountry
+  destinationZipCode
+  tripDistance
+  dimensionsLength
+  dimensionsWeight
+  dimensionsWidth
+  dimensionsHeight
+  dimensionsCube
+  postedRate
+  equipmentCode
+  equipmentName
+  equipmentOptions
+  isBookItNow
+  loadTrackingRequired
+  allInRate
+  rpm @include(if: $isPro)
+  accountName
+  experienceFactor
+  daysToPay
+  bondTypeId
+  bondEnabled
+  payEnabled
+  dot
+  brokerMC
+  commodityId
+  specialInfo
+  createdOn
+  additionalLoadStops
+  loadStateId
+  phone
+  legacyLoadId
+  updatedOn
+  canBookItNow
+  daysToPayInteger
+  postedAsUserPhone
+  bondTypeSortOrder
+  diamondCount
+  earningsScore
+  loadPopularity
+  factorabilityStatus
+  hasTiers
+  isCarrierOnboarded
+  isPinnedLoad
+  isRepost
+  rowType
+  isCompanyFactorable
+  __typename
+}`;
+
 /** Геокодировка origin (city, state) → lat, lon через Nominatim. */
 async function geocodeOrigin(origin) {
     if (!origin || (!origin.city && !origin.state)) return null;
@@ -439,6 +514,67 @@ const TruckstopAdapter = {
                 error: { code: 'NETWORK_ERROR', message: e?.message || 'Network error', retriable: true }
             };
         }
+    },
+
+    /**
+     * Auto-refresh: получить самые свежие грузы (sorted by updatedOn desc).
+     * Возвращает { ok, loads, meta } — только НОВЫЕ грузы (limit=20).
+     * Вызывается из background по таймеру.
+     */
+    async refreshNew(params, ctx = {}) {
+        const token = ctx.token;
+        const claims = ctx.claims;
+        if (!token || !claims || !claims.v5AccountId) {
+            return { ok: false, loads: [], meta: { board: BOARD } };
+        }
+
+        // Геокодируем origin
+        let originLat = null, originLon = null;
+        if (params?.origin && (params.origin.city || params.origin.state)) {
+            const coords = await geocodeOrigin(params.origin);
+            if (coords) { originLat = coords.lat; originLon = coords.lon; }
+        }
+        if (originLat == null || originLon == null) {
+            return { ok: false, loads: [], meta: { board: BOARD } };
+        }
+
+        const args = {
+            dh_origin_lat: originLat,
+            dh_origin_lon: originLon,
+            origin_radius: Number(params.radius) || 125,
+            pickup_date_begin: params.dateFrom ? String(params.dateFrom).slice(0, 10) : new Date().toISOString().slice(0, 10),
+            pickup_date_end: params.dateTo ? String(params.dateTo).slice(0, 10) : null,
+            carrier_id: claims.v5AccountId,
+            gl_carrier_user_id: claims.accountUserId,
+            account_user_id: claims.v5AccountUserId,
+            enable_pinned_loads: true,
+            enable_floating_loads: true,
+            show_empty_minimum_authority_days_required: null,
+            carrier_factoring_company_id: null,
+            offset_num: 0,
+            limit_num: 20   // Маленькая пачка — только свежие
+        };
+        if (!args.pickup_date_end) {
+            const d = new Date(args.pickup_date_begin);
+            d.setDate(d.getDate() + 45);
+            args.pickup_date_end = d.toISOString().slice(0, 10);
+        }
+
+        const body = JSON.stringify({
+            operationName: 'LoadSearchSortByUpdatedOnDesc',
+            variables: { args, isPro: false },
+            query: BUILTIN_GRAPHQL_QUERY_UPDATED
+        });
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Authorization': `Bearer ${token}`,
+            'Origin': 'https://main.truckstop.com',
+            'Referer': 'https://main.truckstop.com/'
+        };
+
+        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
     }
 };
 

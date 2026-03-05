@@ -11,7 +11,7 @@
         console.log('[AIDA/Harvester] TruckerPath harvester already loaded, re-patching fetch/XHR');
     }
     window.__aidaHarvesterTruckerpath = true;
-    var _build = '0.1.45';
+    var _build = '0.1.46';
     console.log('[AIDA/Harvester] TruckerPath harvester loaded — build ' + _build);
 
     function sendToBridge(payload) {
