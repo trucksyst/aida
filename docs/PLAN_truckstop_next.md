@@ -16,6 +16,7 @@
 - [x] Auto-refresh каждую минуту (20 свежих грузов через UpdatedOnDesc)
 - [x] Подсветка новых грузов (row-new, еле-синий фон, < 3 мин)
 - [x] Убран template из search() — только built-in GraphQL + JWT
+- [x] Колонка Posted вместо Date — относительное время (NEW, 0:02, 1:15, 5h)
 
 ---
 

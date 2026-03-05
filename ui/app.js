@@ -935,6 +935,21 @@ function getSortedLoads() {
     });
 }
 
+/** Форматирует время с момента публикации: NEW, 0:02, 1:15, 5h, 2d */
+function formatPostedAgo(postedAt) {
+    if (!postedAt) return '—';
+    const ms = Date.now() - new Date(postedAt).getTime();
+    if (isNaN(ms) || ms < 0) return '—';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return '<span class="posted-new">NEW</span>';
+    if (mins < 60) return `0:${String(mins).padStart(2, '0')}`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    if (hrs < 24) return `${hrs}:${String(remMins).padStart(2, '0')}`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d`;
+}
+
 function renderRow(load) {
     const rate = load.rate ? `$${load.rate.toLocaleString()}` : '—';
     const rpm = load.rpm ? `$${load.rpm}` : '—';
@@ -943,7 +958,7 @@ function renderRow(load) {
     const miles = load.miles ? `${load.miles.toLocaleString()}` : '—';
     const weight = load.weight ? `${(load.weight / 1000).toFixed(0)}k lbs` : '—';
     const broker = esc(load.broker?.company || '—');
-    const dateStr = load.pickupDate ? load.pickupDate.slice(5) : '—'; // MM-DD
+    const postedStr = formatPostedAgo(load.postedAt);
     const status = renderStatusBadge(load.status);
     const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
 
@@ -965,7 +980,7 @@ function renderRow(load) {
         <td>${weight}</td>
         <td>${broker}</td>
         <td>${board}</td>
-        <td>${dateStr}</td>
+        <td class="td-posted">${postedStr}</td>
         <td>${status}</td>
     </tr>`;
 }

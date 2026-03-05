@@ -708,8 +708,13 @@ body {
 }
 
 @keyframes row-new-fade {
-    0% { background: rgba(31, 111, 235, 0.08); }
-    100% { background: transparent; }
+    0% {
+        background: rgba(31, 111, 235, 0.08);
+    }
+
+    100% {
+        background: transparent;
+    }
 }
 
 [data-theme="light"] #load-table tbody tr.row-new {
@@ -731,6 +736,23 @@ body {
 .td-rpm {
     color: var(--text-secondary);
     font-size: var(--font-size-xs);
+}
+
+.td-posted {
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.posted-new {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    background: var(--accent);
+    color: #fff;
+    letter-spacing: 0.3px;
 }
 
 .td-route strong {
