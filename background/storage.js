@@ -96,7 +96,7 @@ const Storage = {
       theme: data['settings:theme'] || 'light',
       truckstopRequestTemplate: data['settings:truckstopRequestTemplate'] || null,
       truckerpathRequestTemplate: data['settings:truckerpathRequestTemplate'] || null,
-      disabledBoards: data['settings:disabledBoards'] || {}
+      disabledBoards: data['settings:disabledBoards'] || { dat: true, truckstop: true, tp: true }
     };
   },
 

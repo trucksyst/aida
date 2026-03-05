@@ -11,6 +11,96 @@ const BOARD = 'truckstop';
 /** Ключ описания груза (COMMENTS) в сырой карточке — взять из консоли, не угадывать. */
 const RAW_FIELD_COMMENTS = 'comments';
 
+/** Built-in GraphQL endpoint (Hasura) — не требует Authorization. */
+const BUILTIN_GRAPHQL_URL = 'https://loadsearch-graphql-api-prod.truckstop.com/v1/graphql';
+
+/** Equipment name маппинг (AIDA → Truckstop display names для template-based search). */
+const TS_EQUIP_MAP = {
+    'VAN': 'Van', 'REEFER': 'Reefer', 'FLATBED': 'Flatbed',
+    'STEPDECK': 'Step Deck', 'DOUBLEDROP': 'Double Drop',
+    'LOWBOY': 'Lowboy', 'RGN': 'Removable Gooseneck',
+    'HOPPER': 'Hopper Bottom', 'TANKER': 'Tanker',
+    'POWERONLY': 'Power Only', 'CONTAINER': 'Container',
+    'DUMP': 'Dump Trailer', 'AUTOCARRIER': 'Auto Carrier',
+    'LANDOLL': 'Landoll', 'MAXI': 'Maxi'
+};
+
+
+/** Полный GraphQL query для built-in поиска (из HAR main.truckstop.com). */
+const BUILTIN_GRAPHQL_QUERY = `query LoadSearchSortByBinRateDesc($args: get_loads_with_extra_data_sort_by_bin_rate_desc_args! = {}, $isPro: Boolean!) {
+  get_loads_with_extra_data_sort_by_bin_rate_desc(args: $args) {
+    ...GridLoadSearchFields
+    __typename
+  }
+}
+
+fragment GridLoadSearchFields on loads_grid_ret_type {
+  id
+  modeId
+  modeCode
+  originCity
+  originState
+  originCityState
+  originEarlyTime
+  originLateTime
+  originDeadhead
+  originCountry
+  originZipCode
+  destinationCity
+  destinationState
+  destinationCityState
+  destinationEarlyTime
+  destinationLateTime
+  destinationDeadhead
+  destinationCountry
+  destinationZipCode
+  tripDistance
+  dimensionsLength
+  dimensionsWeight
+  dimensionsWidth
+  dimensionsHeight
+  dimensionsCube
+  postedRate
+  equipmentCode
+  equipmentName
+  equipmentOptions
+  isBookItNow
+  loadTrackingRequired
+  allInRate
+  rpm @include(if: $isPro)
+  accountName
+  experienceFactor
+  daysToPay
+  bondTypeId
+  bondEnabled
+  payEnabled
+  dot
+  brokerMC
+  commodityId
+  specialInfo
+  createdOn
+  additionalLoadStops
+  loadStateId
+  phone
+  legacyLoadId
+  updatedOn
+  canBookItNow
+  daysToPayInteger
+  postedAsUserPhone
+  bondTypeSortOrder
+  diamondCount
+  earningsScore
+  loadPopularity
+  factorabilityStatus
+  hasTiers
+  isCarrierOnboarded
+  isPinnedLoad
+  isRepost
+  rowType
+  isCompanyFactorable
+  __typename
+}`;
+
 /** Геокодировка origin (city, state) → lat, lon через Nominatim. */
 async function geocodeOrigin(origin) {
     if (!origin || (!origin.city && !origin.state)) return null;
@@ -163,6 +253,7 @@ const TruckstopAdapter = {
         console.log('[AIDA/Truckstop] Step: search called, params=', JSON.stringify(params || {}).slice(0, 120));
         const token = ctx.token;
         const template = ctx.truckstopTemplate;
+        const claims = ctx.claims;  // { v5AccountId, accountUserId, v5AccountUserId } из JWT
 
         if (!token) {
             return {
@@ -170,19 +261,34 @@ const TruckstopAdapter = {
                 error: { code: 'AUTH_REQUIRED', message: 'Truckstop token is missing', retriable: true }
             };
         }
-        if (!template || !template.url) {
-            return {
-                ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'NO_TEMPLATE', message: 'Open truckstop.com, run one search to capture template. Then AIDA will use it automatically.', retriable: false }
-            };
+
+        // Если есть template — использовать его (приоритет). Иначе — built-in GraphQL.
+        if (template && template.url) {
+            if (template.url.indexOf('LoadSearchCount') !== -1 || template.url.indexOf('searchCount') !== -1) {
+                return {
+                    ok: false, loads: [], meta: { board: BOARD },
+                    error: { code: 'WRONG_TEMPLATE', message: 'Saved template is for count, not loads.', retriable: false }
+                };
+            }
+            return this._searchWithTemplate(params, token, template);
         }
-        if (template.url.indexOf('LoadSearchCount') !== -1 || template.url.indexOf('searchCount') !== -1) {
+
+        // Нет template — попробовать built-in GraphQL (нужны claims из JWT)
+        if (!claims || !claims.v5AccountId) {
             return {
                 ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'WRONG_TEMPLATE', message: 'Saved template is for count, not loads.', retriable: false }
+                error: { code: 'NO_TEMPLATE', message: 'Missing JWT claims. Re-login to Truckstop.', retriable: true }
             };
         }
 
+        return this._searchBuiltIn(params, token, claims);
+    },
+
+    /**
+     * Поиск через захваченный шаблон (template от харвестера).
+     * Старая логика — модифицирует body шаблона подставляя параметры.
+     */
+    async _searchWithTemplate(params, token, template) {
         let body = template.body;
         try {
             const parsed = typeof body === 'string' ? JSON.parse(body) : body;
@@ -207,21 +313,11 @@ const TruckstopAdapter = {
 
                     // Equipment (поддержка массива)
                     if (params?.equipment) {
-                        const TS_EQUIP = {
-                            'VAN': 'Van', 'REEFER': 'Reefer', 'FLATBED': 'Flatbed',
-                            'STEPDECK': 'Step Deck', 'DOUBLEDROP': 'Double Drop',
-                            'LOWBOY': 'Lowboy', 'RGN': 'Removable Gooseneck',
-                            'HOPPER': 'Hopper Bottom', 'TANKER': 'Tanker',
-                            'POWERONLY': 'Power Only', 'CONTAINER': 'Container',
-                            'DUMP': 'Dump Trailer', 'AUTOCARRIER': 'Auto Carrier',
-                            'LANDOLL': 'Landoll', 'MAXI': 'Maxi'
-                        };
                         const eqArr = Array.isArray(params.equipment) ? params.equipment : [params.equipment];
-                        const tsNames = eqArr.map(e => TS_EQUIP[e] || e);
+                        const tsNames = eqArr.map(e => TS_EQUIP_MAP[e] || e);
                         const eqKeys = ['equipmentType', 'equipment_type', 'equipment', 'equipmentCode', 'trailerType'];
                         for (const k of eqKeys) {
                             if (m[k] !== undefined) {
-                                // Если поле было строкой — ставим первое, если массив — весь массив
                                 m[k] = Array.isArray(m[k]) ? tsNames : tsNames[0];
                                 modified = true;
                             }
@@ -247,9 +343,78 @@ const TruckstopAdapter = {
             headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
         }
 
+        return this._doFetch(template.url, template.method || 'POST', headers, body);
+    },
+
+    /**
+     * Built-in поиск через захардкоженный GraphQL query.
+     * Не требует captured template — только JWT claims + параметры поиска.
+     */
+    async _searchBuiltIn(params, token, claims) {
+        console.log('[AIDA/Truckstop] Step: using built-in GraphQL (no template)');
+
+        // Геокодируем origin
+        let originLat = null, originLon = null;
+        if (params?.origin && (params.origin.city || params.origin.state)) {
+            const coords = await geocodeOrigin(params.origin);
+            if (coords) {
+                originLat = coords.lat;
+                originLon = coords.lon;
+            }
+        }
+        if (originLat == null || originLon == null) {
+            return {
+                ok: false, loads: [], meta: { board: BOARD },
+                error: { code: 'GEOCODE_FAILED', message: 'Could not geocode origin city', retriable: false }
+            };
+        }
+
+        const args = {
+            dh_origin_lat: originLat,
+            dh_origin_lon: originLon,
+            origin_radius: Number(params.radius) || 125,
+            pickup_date_begin: params.dateFrom ? String(params.dateFrom).slice(0, 10) : new Date().toISOString().slice(0, 10),
+            pickup_date_end: params.dateTo ? String(params.dateTo).slice(0, 10) : null,
+            carrier_id: claims.v5AccountId,
+            gl_carrier_user_id: claims.accountUserId,
+            account_user_id: claims.v5AccountUserId,
+            enable_pinned_loads: true,
+            enable_floating_loads: true,
+            show_empty_minimum_authority_days_required: null,
+            carrier_factoring_company_id: null,
+            offset_num: 0,
+            limit_num: 100
+        };
+        // pickup_date_end fallback: +45 дней от pickup_date_begin
+        if (!args.pickup_date_end) {
+            const d = new Date(args.pickup_date_begin);
+            d.setDate(d.getDate() + 45);
+            args.pickup_date_end = d.toISOString().slice(0, 10);
+        }
+        // Примечание: equipment_ids НЕ передаём — Truckstop фильтрует equipment на клиенте
+
+        const body = JSON.stringify({
+            operationName: 'LoadSearchSortByBinRateDesc',
+            variables: { args, isPro: false },
+            query: BUILTIN_GRAPHQL_QUERY
+        });
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Authorization': `Bearer ${token}`,
+            'Origin': 'https://main.truckstop.com',
+            'Referer': 'https://main.truckstop.com/'
+        };
+
+        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
+    },
+
+    /** Общий метод выполнения GraphQL запроса и парсинга результатов. */
+    async _doFetch(url, method, headers, body) {
         try {
-            const resp = await fetch(template.url, {
-                method: template.method || 'POST',
+            const resp = await fetch(url, {
+                method,
                 headers,
                 credentials: 'include',
                 body: typeof body === 'string' ? body : JSON.stringify(body)
@@ -268,6 +433,7 @@ const TruckstopAdapter = {
             const loads = normalizeTruckstopResults(rawResults);
             return { ok: true, loads, meta: { board: BOARD } };
         } catch (e) {
+            console.error('[AIDA/Truckstop] _doFetch error:', e?.message);
             return {
                 ok: false, loads: [], meta: { board: BOARD },
                 error: { code: 'NETWORK_ERROR', message: e?.message || 'Network error', retriable: true }

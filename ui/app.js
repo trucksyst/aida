@@ -17,7 +17,7 @@ const state = {
     history: [],
     settings: {},
     selectedLoad: null,
-    sortColumn: 'rate',
+    sortColumn: 'postedAt',
     sortAsc: false,
     agentEnabled: false,
     boardStatus: { dat: false, truckstop: false },
@@ -924,8 +924,8 @@ function getSortedLoads() {
             case 'broker': va = a.broker?.company || ''; vb = b.broker?.company || ''; break;
             case 'board': va = a.board || ''; vb = b.board || ''; break;
             case 'pickupDate': va = a.pickupDate || ''; vb = b.pickupDate || ''; break;
+            case 'postedAt': va = a.postedAt || ''; vb = b.postedAt || ''; break;
             case 'status': va = a.status || ''; vb = b.status || ''; break;
-            default: va = 0; vb = 0;
         }
 
         if (typeof va === 'string') {

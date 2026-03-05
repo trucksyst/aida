@@ -543,6 +543,8 @@ async function searchLoads(params) {
     const existing = await Storage.getLoads();
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
     const disabled = settings.disabledBoards || {};
+    // JWT claims для Truckstop built-in GraphQL
+    const tsClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
 
     // Отключённые борды и борды без настройки не участвуют в поиске.
     // DAT — всегда запускается (у него есть auth-модуль с auto-login).
@@ -550,12 +552,12 @@ async function searchLoads(params) {
     // TruckerPath — только если есть шаблон (template).
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const skipDat = !!disabled.dat;
-    const skipTs = !!disabled.truckstop || !tsToken;
-    const skipTp = !!disabled.tp || !tpTemplate;
+    const skipTs = !!disabled.truckstop;
+    const skipTp = !!disabled.tp;
 
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
         skipDat ? Promise.resolve(skipResult) : DatAdapter.search(params),
-        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate }),
+        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate, claims: tsClaims }),
         skipTp ? Promise.resolve(skipResult) : TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
@@ -626,7 +628,8 @@ async function searchLoads(params) {
                     }
                     if (board === 'truckstop' && !disabled.truckstop) {
                         const freshTsToken = await Storage.getToken('truckstop');
-                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, truckstopTemplate: tsTemplate });
+                        const freshClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
+                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, truckstopTemplate: tsTemplate, claims: freshClaims });
                         tsLoads = retryResult?.loads || [];
                         const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
                         if (idx !== -1) adapterWarnings.splice(idx, 1);

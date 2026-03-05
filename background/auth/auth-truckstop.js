@@ -43,7 +43,8 @@ const TS_AUTH_CONFIG = {
 /** Storage ключи для auth:truckstop */
 const STORAGE_KEYS = {
     token: 'token:truckstop',
-    tokenMeta: 'auth:truckstop:meta'    // { issuedAt, expiresAt, userId, source }
+    tokenMeta: 'auth:truckstop:meta',   // { issuedAt, expiresAt, userId, source }
+    claims: 'auth:truckstop:claims'     // { v5AccountId, accountUserId, v5AccountUserId }
 };
 
 const AuthTruckstop = {
@@ -346,6 +347,7 @@ const AuthTruckstop = {
     /**
      * Сохранить токен + мета-данные в Storage.
      * Пишет в тот же ключ `token:truckstop`, что и харвестер — совместимость 100%.
+     * Также извлекает claims для GraphQL запросов (JWT decode → introspection fallback).
      */
     async _saveToken(token, source, userId) {
         const now = Date.now();
@@ -355,11 +357,53 @@ const AuthTruckstop = {
             userId: userId || null,
             source  // 'login' | 'silent_refresh' | 'harvester' | 'harvester_popup'
         };
-        await chrome.storage.local.set({
+        const storageData = {
             [STORAGE_KEYS.token]: token,
             [STORAGE_KEYS.tokenMeta]: meta
-        });
-    }
+        };
+
+        // Извлекаем claims из JWT (вложенный объект decoded.claims)
+        const claims = this._decodeJwtClaims(token);
+
+        if (claims && claims.v5AccountId) {
+            storageData[STORAGE_KEYS.claims] = claims;
+            console.log('[AIDA/Auth/TS] Claims saved:', {
+                v5AccountId: claims.v5AccountId ? '✓' : '✗',
+                accountUserId: claims.accountUserId ? '✓' : '✗',
+                v5AccountUserId: claims.v5AccountUserId ? '✓' : '✗'
+            });
+        }
+        // Если claims нет (например, raw Bearer от харвестера) — не перезаписываем ранее сохранённые
+        await chrome.storage.local.set(storageData);
+    },
+
+    /**
+     * Декодировать JWT payload и извлечь claims для GraphQL.
+     * JWT Truckstop: { id, hasura-claims, claims: { v5AccountId, accountUserId, ... }, iat, exp }
+     */
+    _decodeJwtClaims(token) {
+        if (!token || typeof token !== 'string') return null;
+        try {
+            const parts = token.split('.');
+            if (parts.length < 2) return null;
+            const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+            const decoded = JSON.parse(atob(padded));
+
+            // Claims вложены в decoded.claims (не на верхнем уровне!)
+            const c = decoded.claims || decoded;
+            return {
+                v5AccountId: c.v5AccountId || c.V5AccountId || c.account_id || null,
+                accountUserId: c.accountUserId || c.AccountUserId || null,
+                v5AccountUserId: c.v5AccountUserId || c.V5AccountUserId || null,
+                contactSfId: c.contactSfId || c.ContactSfId || null
+            };
+        } catch (e) {
+            console.warn('[AIDA/Auth/TS] JWT decode failed:', e.message);
+            return null;
+        }
+    },
+
 };
 
 export default AuthTruckstop;
