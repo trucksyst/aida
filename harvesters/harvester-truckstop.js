@@ -98,8 +98,12 @@
                 auth = opts.headers['Authorization'] || opts.headers['authorization'];
             }
         }
+        // Отправляем токен ТОЛЬКО если это настоящий JWT (eyJ..., 3 части)
         if (auth && auth.startsWith('Bearer ')) {
-            sendToken(auth.slice(7));
+            var bearerToken = auth.slice(7);
+            if (bearerToken.indexOf('eyJ') === 0 && bearerToken.split('.').length === 3) {
+                sendToken(bearerToken);
+            }
         }
 
         // Перехват запроса (до отправки) — для сохранения шаблона в Core

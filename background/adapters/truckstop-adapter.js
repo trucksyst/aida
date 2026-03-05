@@ -239,10 +239,16 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        // ЗАМЕНЯЕМ Authorization на свежий JWT от auth-модуля 
-        // (старый из template может быть expired)
-        if (token) {
+        // Удаляем старый Authorization из template (может быть expired)
+        delete headers['Authorization'];
+        delete headers['authorization'];
+        // Ставим свежий — ТОЛЬКО если токен это настоящий JWT (3 части через точку)
+        const isJwt = token && typeof token === 'string' && token.split('.').length === 3 && token.startsWith('eyJ');
+        if (isJwt) {
             headers['Authorization'] = `Bearer ${token}`;
+            console.log('[AIDA/Truckstop] Step: using fresh JWT for Authorization ✓');
+        } else {
+            console.warn('[AIDA/Truckstop] Step: token is NOT a JWT, skipping Authorization. Token preview:', String(token).slice(0, 30));
         }
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         if (!headers['Origin']) headers['Origin'] = 'https://main.truckstop.com';
