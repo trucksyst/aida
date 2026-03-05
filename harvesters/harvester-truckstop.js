@@ -80,9 +80,9 @@
             (url.indexOf('api.truckstop.com') !== -1 && (url.indexOf('load') !== -1 || url.indexOf('search') !== -1));
     }
 
-    /** v5-auth эндпоинт — токен или renew (ответ содержит accessToken). */
-    function isV5AuthUrl(url) {
-        return url.indexOf('v5-auth.truckstop.com/auth/token') !== -1 ||
+    /** Проверка: это URL v5-auth (token или renew) — ловим JWT из response body. */
+    function isV5AuthTokenUrl(url) {
+        return url.indexOf('v5-auth.truckstop.com/auth/token/') !== -1 ||
             url.indexOf('v5-auth.truckstop.com/auth/renew') !== -1;
     }
 
@@ -98,12 +98,8 @@
                 auth = opts.headers['Authorization'] || opts.headers['authorization'];
             }
         }
-        // Отправляем токен ТОЛЬКО если это настоящий JWT (eyJ..., 3 части)
         if (auth && auth.startsWith('Bearer ')) {
-            var bearerToken = auth.slice(7);
-            if (bearerToken.indexOf('eyJ') === 0 && bearerToken.split('.').length === 3) {
-                sendToken(bearerToken);
-            }
+            sendToken(auth.slice(7));
         }
 
         // Перехват запроса (до отправки) — для сохранения шаблона в Core
@@ -131,23 +127,21 @@
 
         const response = await origFetch.apply(this, args);
 
-        // === Перехват v5-auth token/renew ответа ===
-        // v5-auth.truckstop.com/auth/token/{userId} или /auth/renew
-        // Ответ: { accessToken: "eyJ..." }
-        if (response.ok && isV5AuthUrl(url)) {
+        // ---- Перехват v5-auth token response (JWT из body) ----
+        if (isV5AuthTokenUrl(url) && response.ok) {
             try {
-                var authClone = response.clone();
-                var authText = await authClone.text();
-                if (authText && authText.trim().charAt(0) === '{') {
-                    var authData = JSON.parse(authText);
-                    var v5Token = authData.accessToken || authData.access_token;
-                    if (v5Token && typeof v5Token === 'string' && v5Token.length > 50) {
-                        console.log('[AIDA/Harvester] Step: Truckstop v5-auth token captured from', url.indexOf('renew') !== -1 ? 'renew' : 'token endpoint');
-                        sendToken(v5Token);
+                var tokenClone = response.clone();
+                var tokenText = await tokenClone.text();
+                if (tokenText && tokenText.trim().charAt(0) === '{') {
+                    var tokenData = JSON.parse(tokenText);
+                    var jwt = tokenData.accessToken || tokenData.access_token;
+                    if (jwt) {
+                        console.log('[AIDA/Harvester] Step: Truckstop v5-auth token captured from response');
+                        sendToken(jwt);
                     }
                 }
             } catch (e) {
-                console.warn('[AIDA/Harvester] v5-auth response parse error:', e && e.message);
+                console.warn('[AIDA/Harvester] Step: Truckstop v5-auth parse error', e && e.message);
             }
         }
 
@@ -209,6 +203,7 @@
         var xhr = this;
         var url = (xhr._aidaUrl || '').toString();
         var isSearch = isTruckstopSearchUrl(url);
+        var isV5Auth = isV5AuthTokenUrl(url);
 
         // Перехват запроса (до отправки) — для сохранения шаблона в Core
         if (isSearch && (xhr._aidaMethod === 'POST' || xhr._aidaMethod === 'post') && body) {
@@ -226,6 +221,22 @@
         }
 
         function onLoad() {
+            // v5-auth token interception
+            if (isV5Auth && xhr.readyState === 4 && xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    var text = xhr.responseText;
+                    if (text && text.trim().charAt(0) === '{') {
+                        var data = JSON.parse(text);
+                        var jwt = data.accessToken || data.access_token;
+                        if (jwt) {
+                            console.log('[AIDA/Harvester] Step: Truckstop v5-auth XHR token captured');
+                            sendToken(jwt);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[AIDA/Harvester] Step: Truckstop v5-auth XHR parse error', e && e.message);
+                }
+            }
             if (!isSearch || xhr.readyState !== 4 || xhr.status < 200 || xhr.status >= 300) return;
             try {
                 var text = xhr.responseText;
@@ -250,7 +261,7 @@
                 console.warn('[AIDA/Harvester] Step: Truckstop XHR parse error', e && e.message);
             }
         }
-        if (isSearch) {
+        if (isSearch || isV5Auth) {
             if (xhr.addEventListener) {
                 xhr.addEventListener('load', onLoad);
             } else {

@@ -173,7 +173,7 @@ const TruckstopAdapter = {
         if (!template || !template.url) {
             return {
                 ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'NO_TEMPLATE', message: 'Truckstop request template not captured; open truckstop.com and run search there once', retriable: false }
+                error: { code: 'NO_TEMPLATE', message: 'Open truckstop.com, run one search to capture template. Then AIDA will use it automatically.', retriable: false }
             };
         }
         if (template.url.indexOf('LoadSearchCount') !== -1 || template.url.indexOf('searchCount') !== -1) {
@@ -239,17 +239,7 @@ const TruckstopAdapter = {
         }
 
         const headers = { ...(template.headers || {}) };
-        // Удаляем старый Authorization из template (может быть expired)
-        delete headers['Authorization'];
-        delete headers['authorization'];
-        // Ставим свежий — ТОЛЬКО если токен это настоящий JWT (3 части через точку)
-        const isJwt = token && typeof token === 'string' && token.split('.').length === 3 && token.startsWith('eyJ');
-        if (isJwt) {
-            headers['Authorization'] = `Bearer ${token}`;
-            console.log('[AIDA/Truckstop] Step: using fresh JWT for Authorization ✓');
-        } else {
-            console.warn('[AIDA/Truckstop] Step: token is NOT a JWT, skipping Authorization. Token preview:', String(token).slice(0, 30));
-        }
+        if (!headers['Authorization'] && !headers['authorization']) headers['Authorization'] = `Bearer ${token}`;
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         if (!headers['Origin']) headers['Origin'] = 'https://main.truckstop.com';
         if (!headers['Referer']) headers['Referer'] = 'https://main.truckstop.com/';
@@ -257,33 +247,15 @@ const TruckstopAdapter = {
             headers['Cookie'] = template.cookies.map(c => c.name + '=' + c.value).join('; ');
         }
 
-        // === DEBUG: сравнение оригинала и AIDA ===
-        const finalBody = typeof body === 'string' ? body : JSON.stringify(body);
-        console.log('=== [AIDA/Truckstop] DEBUG: ORIGINAL template body ===');
-        console.log(String(template.body || '').slice(0, 800));
-        console.log('=== [AIDA/Truckstop] DEBUG: AIDA modified body ===');
-        console.log(String(finalBody || '').slice(0, 800));
-        console.log('=== [AIDA/Truckstop] DEBUG: Headers sent ===');
-        console.log(JSON.stringify(Object.keys(headers)));
-        console.log('Authorization:', headers['Authorization']?.slice(0, 50), '...');
-
         try {
             const resp = await fetch(template.url, {
                 method: template.method || 'POST',
                 headers,
                 credentials: 'include',
-                body: finalBody
+                body: typeof body === 'string' ? body : JSON.stringify(body)
             });
             const text = await resp.text();
-            console.log('[AIDA/Truckstop] Step: API response status:', resp.status, 'body preview:', text?.slice(0, 300));
             if (!resp.ok) {
-                // 401/403 → токен невалидный
-                if (resp.status === 401 || resp.status === 403) {
-                    return {
-                        ok: false, loads: [], meta: { board: BOARD },
-                        error: { code: 'AUTH_REQUIRED', message: `HTTP ${resp.status}: token rejected`, retriable: true }
-                    };
-                }
                 return {
                     ok: false, loads: [], meta: { board: BOARD },
                     error: { code: 'FETCH_FAILED', message: `HTTP ${resp.status}: ${text?.slice(0, 100)}`, retriable: resp.status >= 500 }
@@ -291,10 +263,6 @@ const TruckstopAdapter = {
             }
             if (!text || text.trim().charAt(0) === '<') return { ok: true, loads: [], meta: { board: BOARD } };
             const data = JSON.parse(text);
-            // Логируем GraphQL ошибки если есть
-            if (data.errors) {
-                console.warn('[AIDA/Truckstop] GraphQL errors:', JSON.stringify(data.errors).slice(0, 300));
-            }
             const rawResults = findLoadsArray(data, true);
             if (!Array.isArray(rawResults)) return { ok: true, loads: [], meta: { board: BOARD } };
             const loads = normalizeTruckstopResults(rawResults);

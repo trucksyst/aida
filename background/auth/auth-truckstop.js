@@ -1,22 +1,26 @@
 /**
  * AIDA v0.1 — Auth Truckstop
  *
- * Модуль авторизации для Truckstop.com через PingOne DaVinci.
- * Полностью автономный блок — по аналогии с auth-dat.js.
+ * Модуль авторизации для Truckstop через PingOne DaVinci.
+ * Полностью автономный блок — аналог auth-dat.js.
  *
- * Flow:
- *   1. login()  → открывает popup auth.truckstop.com/as/authorize
- *   2. Пользователь вводит email, пароль (+ MFA если включён)
- *   3. PingOne DaVinci отправляет form_post → app.truckstop.com/Landing/PingExternalLoginCallback
- *   4. Redirect chain: V5Redirector → main.truckstop.com?id={userId}&event=login
- *   5. Модуль перехватывает URL, извлекает userId
- *   6. GET v5-auth.truckstop.com/auth/token/{userId} → JWT
- *   7. JWT сохраняется в token:truckstop + мета в auth:truckstop:meta
+ * Flow (login):
+ *   1. login() → popup окно auth.truckstop.com/as/authorize
+ *   2. Юзер вводит email, пароль (+ MFA если требуется)
+ *   3. PingOne DaVinci → form_post callback → redirect chain:
+ *      app.truckstop.com/Landing/PingExternalLoginCallback
+ *      → /Landing/V5Redirector
+ *      → main.truckstop.com?id={userId}&event=login
+ *   4. Из URL парсим userId
+ *   5. GET v5-auth.truckstop.com/auth/token/{userId} → { accessToken: jwt }
+ *   6. JWT сохраняется в token:truckstop + мета в auth:truckstop:meta
  *
- *   silentRefresh() → POST v5-auth.truckstop.com/auth/renew { token: jwt }
- *   → { accessToken: "новый JWT" }  (без popup, без вкладки!)
+ * Flow (silent refresh):
+ *   POST v5-auth.truckstop.com/auth/renew + { token: currentJWT }
+ *   → { accessToken: newJWT }
+ *   Не нужен ни popup, ни скрытый таб!
  *
- * PingOne параметры:
+ * PingOne параметры Truckstop:
  *   client_id:      7a99fb37-0cbd-4526-a557-bd283b9e9cf4
  *   redirect_uri:   https://app.truckstop.com/Landing/PingExternalLoginCallback
  *   response_type:  code id_token token
@@ -31,43 +35,39 @@ const TS_AUTH_CONFIG = {
     responseMode: 'form_post',
     authServiceUrl: 'https://v5-auth.truckstop.com/auth',
     mainUrl: 'https://main.truckstop.com',
-    // Токен живёт ~1200 сек (20 мин). Обновляем за 3 минуты до истечения.
-    tokenLifetimeSec: 1200,
+    // Токен живёт ~20 мин (1199 сек). Обновляем за 3 мин до истечения.
+    tokenLifetimeSec: 1199,
     refreshBeforeExpirySec: 180
 };
 
 /** Storage ключи для auth:truckstop */
 const STORAGE_KEYS = {
     token: 'token:truckstop',
-    tokenMeta: 'auth:truckstop:meta'   // { issuedAt, expiresAt, userId, source }
+    tokenMeta: 'auth:truckstop:meta'    // { issuedAt, expiresAt, userId, source }
 };
 
 const AuthTruckstop = {
 
     /**
      * Открыть popup-окно для логина в Truckstop.
-     *
-     * 1. Popup открывает auth.truckstop.com/as/authorize
-     * 2. PingOne DaVinci показывает форму логина
-     * 3. После успешного логина → redirect chain → main.truckstop.com?id={userId}
-     * 4. Извлекаем userId из URL
-     * 5. GET v5-auth.truckstop.com/auth/token/{userId} → JWT
-     * 6. Сохраняем JWT + закрываем popup
+     * Popup открывает auth.truckstop.com/as/authorize с параметрами OAuth.
+     * Юзер вводит логин/пароль (+ MFA) → PingOne DaVinci обрабатывает →
+     * redirect chain → main.truckstop.com?id={userId}.
+     * Из URL парсим userId → запрашиваем JWT из v5-auth API.
      */
     login() {
         return new Promise((resolve, reject) => {
+            console.log('[AIDA/Auth/TS] Step: opening login popup (auth.truckstop.com)');
+
             // Строим authorize URL
             const params = new URLSearchParams({
                 client_id: TS_AUTH_CONFIG.clientId,
                 redirect_uri: TS_AUTH_CONFIG.redirectUri,
                 response_type: TS_AUTH_CONFIG.responseType,
                 response_mode: TS_AUTH_CONFIG.responseMode,
-                scope: 'address openid profile email',
-                nonce: this._generateNonce()
+                scope: 'address openid profile email'
             });
             const authorizeUrl = `${TS_AUTH_CONFIG.authorizeUrl}?${params.toString()}`;
-
-            console.log('[AIDA/Auth/TS] Step: opening login popup');
 
             chrome.windows.create({
                 url: authorizeUrl,
@@ -83,119 +83,76 @@ const AuthTruckstop = {
 
                 const popupWindowId = win.id;
                 let resolved = false;
-                let tokenCaptured = null;
-                let userIdCaptured = null;
+                let userId = null;
 
-                // Таймаут 3 минуты (PingOne может быть медленнее Auth0)
+                // Таймаут 3 минуты (MFA может занять время)
                 const timeout = setTimeout(() => {
                     if (!resolved) {
                         resolved = true;
                         cleanup();
                         chrome.windows.remove(popupWindowId).catch(() => { });
-                        if (tokenCaptured) {
-                            resolve({ ok: true, token: tokenCaptured });
-                        } else {
-                            reject(new Error('Login popup timeout'));
-                        }
+                        reject(new Error('Login popup timeout'));
                     }
                 }, 180000);
 
-                // Следим за URL-ами в popup — логируем ВСЕ для отладки
                 const onUpdated = async (tabId, changeInfo, tab) => {
                     if (resolved) return;
                     if (tab.windowId !== popupWindowId) return;
+                    if (!changeInfo.url) return;
 
-                    // === DEBUG: логируем ВСЁ что происходит в popup ===
-                    if (changeInfo.url) {
-                        console.log('[AIDA/Auth/TS] popup URL →', changeInfo.url.slice(0, 250));
-                    }
-                    if (changeInfo.status) {
-                        console.log('[AIDA/Auth/TS] popup status:', changeInfo.status, 'url:', (tab?.url || '').slice(0, 200));
-                    }
+                    const url = changeInfo.url;
 
-                    const url = changeInfo.url || '';
-
-                    // === 1. Ловим redirect на main.truckstop.com (с id= или без) ===
-                    if (url.includes('main.truckstop.com')) {
-                        // Пробуем извлечь userId из URL
-                        let userId = this._extractUserIdFromUrl(url);
-
-                        // Иногда id может быть в hash или другом формате
-                        if (!userId && url.includes('id=')) {
-                            try {
-                                const match = url.match(/[?&]id=([^&]+)/);
-                                if (match) userId = match[1];
-                            } catch (_) { }
-                        }
-
-                        if (userId && !userIdCaptured) {
-                            userIdCaptured = userId;
+                    // Ловим redirect на main.truckstop.com?id={userId}
+                    if (url.includes('main.truckstop.com') && url.includes('id=')) {
+                        const extractedId = this._extractUserIdFromUrl(url);
+                        if (extractedId) {
+                            userId = extractedId;
                             console.log('[AIDA/Auth/TS] Step: userId captured from redirect:', userId);
 
-                            // Получаем v5 JWT token через API
+                            // Запрашиваем JWT из v5-auth API
                             try {
                                 const token = await this._fetchV5Token(userId);
                                 if (token) {
-                                    tokenCaptured = token;
                                     await this._saveToken(token, 'login', userId);
-                                    // Также пишем в Storage напрямую для совместимости
-                                    await chrome.storage.local.set({ 'token:truckstop': token });
-                                    console.log('[AIDA/Auth/TS] Step: v5 token obtained and saved ✓');
-
-                                    // Ждём template — Angular SPA должен загрузиться и сделать search
-                                    // Harvester захватит GraphQL запрос как TS_SEARCH_REQUEST_CAPTURED
-                                    this._waitForTemplate(popupWindowId, timeout, cleanup, resolved, tokenCaptured, resolve, () => resolved, (v) => { resolved = v; });
+                                    console.log('[AIDA/Auth/TS] Step: token obtained and saved. Closing popup.');
+                                    resolved = true;
+                                    clearTimeout(timeout);
+                                    cleanup();
+                                    // Даём 1 сек на визуальное завершение
+                                    setTimeout(() => {
+                                        chrome.windows.remove(popupWindowId).catch(() => { });
+                                    }, 1000);
+                                    resolve({ ok: true, token });
+                                    return;
                                 }
                             } catch (e) {
-                                console.warn('[AIDA/Auth/TS] v5 token fetch failed:', e.message);
+                                console.warn('[AIDA/Auth/TS] v5-auth token fetch failed:', e.message);
                             }
                         }
                     }
 
-                    // === 2. Ловим callback URL (app.truckstop.com/Landing) ===
-                    if (url.includes('app.truckstop.com/Landing')) {
-                        console.log('[AIDA/Auth/TS] Step: PingOne callback detected, waiting for redirect...');
-                    }
-
-                    // === 3. Page complete на main.truckstop.com — fallback через harvester ===
-                    if (changeInfo.status === 'complete' && tab?.url?.includes('main.truckstop.com')) {
-                        if (!tokenCaptured) {
-                            console.log('[AIDA/Auth/TS] Step: main.truckstop.com loaded, waiting for harvester token (5s)...');
-                            // Ждём 5 сек — харвестер должен поймать токен
-                            setTimeout(async () => {
-                                if (resolved || tokenCaptured) return;
-                                // Проверяем storage — харвестер мог записать токен
-                                const stored = await chrome.storage.local.get('token:truckstop');
-                                const storedToken = stored['token:truckstop'];
-                                if (storedToken) {
-                                    tokenCaptured = storedToken;
-                                    console.log('[AIDA/Auth/TS] Step: token from storage after page load ✓');
-                                    resolved = true;
-                                    clearTimeout(timeout);
-                                    cleanup();
-                                    chrome.windows.remove(popupWindowId).catch(() => { });
-                                    resolve({ ok: true, token: tokenCaptured });
-                                }
-                            }, 5000);
-                        }
+                    // Fallback: ловим callback URL (PingExternalLoginCallback)
+                    // redirect chain: callback → V5Redirector → main.truckstop.com
+                    // Если по какой-то причине мы не поймали main.truckstop.com,
+                    // ждём — redirect продолжится автоматически.
+                    if (url.includes('PingExternalLoginCallback')) {
+                        console.log('[AIDA/Auth/TS] Step: PingExternalLoginCallback detected, waiting for redirect to main...');
                     }
                 };
 
-                // Слушаем TOKEN_HARVESTED от харвестера (fallback для токена)
-                // НЕ закрываем popup здесь — _waitForTemplate управляет закрытием
-                const onMessage = (message) => {
+                // Слушаем TOKEN_HARVESTED от харвестера (fallback)
+                const onMessage = async (message) => {
                     if (resolved) return;
-                    if (message.type === 'TOKEN_HARVESTED' && message.board === 'truckstop') {
-                        if (message.token) tokenCaptured = message.token;
-                        console.log('[AIDA/Auth/TS] Step: token from harvester (popup stays open for template)');
-
-                        // Если v5 token ещё не получен — сохраняем от харвестера
-                        if (!userIdCaptured && tokenCaptured) {
-                            this._saveToken(tokenCaptured, 'harvester').catch(console.warn);
-                            chrome.storage.local.set({ 'token:truckstop': tokenCaptured }).catch(console.warn);
-                            // Запускаем ожидание template
-                            this._waitForTemplate(popupWindowId, timeout, cleanup, resolved, tokenCaptured, resolve, () => resolved, (v) => { resolved = v; });
-                        }
+                    if (message.type === 'TOKEN_HARVESTED' && message.board === 'truckstop' && message.token) {
+                        console.log('[AIDA/Auth/TS] Step: token from harvester. Saving...');
+                        await this._saveToken(message.token, 'harvester_popup');
+                        resolved = true;
+                        clearTimeout(timeout);
+                        cleanup();
+                        setTimeout(() => {
+                            chrome.windows.remove(popupWindowId).catch(() => { });
+                        }, 1000);
+                        resolve({ ok: true, token: message.token });
                     }
                 };
 
@@ -206,11 +163,7 @@ const AuthTruckstop = {
                         resolved = true;
                         clearTimeout(timeout);
                         cleanup();
-                        if (tokenCaptured) {
-                            resolve({ ok: true, token: tokenCaptured });
-                        } else {
-                            reject(new Error('Login popup closed without authentication'));
-                        }
+                        reject(new Error('Login popup closed without authentication'));
                     }
                 };
 
@@ -228,10 +181,9 @@ const AuthTruckstop = {
     },
 
     /**
-     * Silent refresh — обновить токен БЕЗ участия пользователя.
-     *
-     * Просто POST к v5-auth.truckstop.com/auth/renew с текущим JWT.
-     * Это НАМНОГО проще чем у DAT (не нужен скрытый таб, iframe, prompt=none).
+     * Silent refresh — обновить токен без участия пользователя.
+     * Простой POST запрос к v5-auth API — НЕ нужен ни popup, ни скрытый таб!
+     * Это проще и надёжнее чем DAT (который требует скрытый таб для Auth0 silent auth).
      *
      * Возвращает: { ok: true, token } или { ok: false, reason }
      */
@@ -242,7 +194,7 @@ const AuthTruckstop = {
         const currentToken = data[STORAGE_KEYS.token];
 
         if (!currentToken) {
-            console.warn('[AIDA/Auth/TS] Silent refresh: no token to renew');
+            console.log('[AIDA/Auth/TS] silentRefresh: no current token');
             return { ok: false, reason: 'no_token' };
         }
 
@@ -252,16 +204,15 @@ const AuthTruckstop = {
                 headers: {
                     'Content-Type': 'application/json',
                     'Origin': TS_AUTH_CONFIG.mainUrl,
-                    'Referer': `${TS_AUTH_CONFIG.mainUrl}/`
+                    'Referer': TS_AUTH_CONFIG.mainUrl + '/'
                 },
                 body: JSON.stringify({ token: currentToken })
             });
 
             if (!resp.ok) {
                 const text = await resp.text().catch(() => '');
-                console.warn(`[AIDA/Auth/TS] Silent refresh failed: HTTP ${resp.status}`, text.slice(0, 200));
+                console.warn(`[AIDA/Auth/TS] silentRefresh failed: HTTP ${resp.status}`, text.slice(0, 200));
 
-                // 401/403 → сессия мертва
                 if (resp.status === 401 || resp.status === 403) {
                     return { ok: false, reason: 'session_expired' };
                 }
@@ -272,28 +223,27 @@ const AuthTruckstop = {
             const newToken = result.accessToken || result.access_token;
 
             if (!newToken) {
-                console.warn('[AIDA/Auth/TS] Silent refresh: no accessToken in response');
+                console.warn('[AIDA/Auth/TS] silentRefresh: no accessToken in response');
                 return { ok: false, reason: 'no_token_in_response' };
             }
 
-            // Сохраняем из мета userId (если был)
+            // Сохраняем userId из мета (если был)
             const meta = data[STORAGE_KEYS.tokenMeta];
             await this._saveToken(newToken, 'silent_refresh', meta?.userId);
-
-            console.log('[AIDA/Auth/TS] Step: token refreshed silently ✓');
+            console.log('[AIDA/Auth/TS] Step: token refreshed silently');
             return { ok: true, token: newToken };
 
         } catch (e) {
-            console.warn('[AIDA/Auth/TS] Silent refresh error:', e.message);
+            console.warn('[AIDA/Auth/TS] silentRefresh error:', e.message);
             return { ok: false, reason: e.message };
         }
     },
 
     /**
      * Получить актуальный токен.
-     * Если токен есть и не истёк — вернуть.
-     * Если истекает скоро — silent refresh в фоне.
-     * Если истёк — попробовать silent refresh синхронно.
+     * Если токен есть и не истёк — вернуть его.
+     * Если истекает скоро — попробовать silent refresh.
+     * Если нет токена — вернуть null.
      */
     async getToken() {
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
@@ -302,38 +252,24 @@ const AuthTruckstop = {
 
         if (!token) return null;
 
-        // Определяем expiresAt: из мета или из JWT
-        const expiresAt = meta?.expiresAt || this._getJwtExpiry(token);
-
-        if (expiresAt) {
+        // Проверяем срок действия
+        if (meta?.expiresAt) {
             const now = Date.now();
-            const refreshThreshold = TS_AUTH_CONFIG.refreshBeforeExpirySec * 1000;
+            const refreshThreshold = (TS_AUTH_CONFIG.refreshBeforeExpirySec * 1000);
 
-            if (now >= expiresAt) {
+            if (now >= meta.expiresAt) {
                 // Токен истёк — пробуем silent refresh
                 console.log('[AIDA/Auth/TS] Token expired, attempting silent refresh');
                 const result = await this.silentRefresh();
                 if (result.ok) return result.token;
-                // Refresh не удался — удаляем мёртвый токен
-                await this.disconnect();
                 return null;
             }
 
-            if (now >= expiresAt - refreshThreshold) {
+            if (now >= meta.expiresAt - refreshThreshold) {
                 // Токен скоро истечёт — обновляем в фоне (не блокируем)
                 console.log('[AIDA/Auth/TS] Token expiring soon, refreshing in background');
                 this.silentRefresh().catch(console.warn);
             }
-
-            // Если мета нет — создаём её (миграция старого токена)
-            if (!meta) {
-                this._saveToken(token, 'migrated').catch(console.warn);
-            }
-        } else {
-            // Не можем определить expiry — токен невалидный, удаляем
-            console.warn('[AIDA/Auth/TS] Token without expiry info, removing');
-            await this.disconnect();
-            return null;
         }
 
         return token;
@@ -341,7 +277,6 @@ const AuthTruckstop = {
 
     /**
      * Статус подключения.
-     * Проверяет expiry из мета И из JWT (для старых токенов без мета).
      */
     async getStatus() {
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
@@ -350,15 +285,7 @@ const AuthTruckstop = {
 
         if (!token) return 'disconnected';
 
-        // Проверяем expiry: из мета или из JWT напрямую
-        const expiresAt = meta?.expiresAt || this._getJwtExpiry(token);
-
-        if (expiresAt && Date.now() >= expiresAt) {
-            return 'expired';
-        }
-
-        // Нет ни мета ни exp в JWT — токен невалиден
-        if (!expiresAt) {
+        if (meta?.expiresAt && Date.now() >= meta.expiresAt) {
             return 'expired';
         }
 
@@ -382,43 +309,38 @@ const AuthTruckstop = {
      */
     _extractUserIdFromUrl(url) {
         try {
-            const parsed = new URL(url);
-            return parsed.searchParams.get('id') || null;
+            const urlObj = new URL(url);
+            return urlObj.searchParams.get('id') || null;
         } catch (e) {
-            console.warn('[AIDA/Auth/TS] _extractUserIdFromUrl error:', e.message);
-            return null;
+            // Fallback: regex
+            const match = url.match(/[?&]id=([^&#]+)/);
+            return match ? match[1] : null;
         }
     },
 
     /**
-     * Получить v5 JWT Token через API.
-     * GET v5-auth.truckstop.com/auth/token/{userId}
+     * Получить JWT из v5-auth API по userId.
+     * GET https://v5-auth.truckstop.com/auth/token/{userId}
      */
     async _fetchV5Token(userId) {
-        if (!userId) throw new Error('No userId');
-
+        if (!userId) return null;
         const url = `${TS_AUTH_CONFIG.authServiceUrl}/token/${userId}`;
         console.log('[AIDA/Auth/TS] Step: fetching v5 token for userId:', userId);
 
         const resp = await fetch(url, {
             headers: {
+                'Accept': 'application/json',
                 'Origin': TS_AUTH_CONFIG.mainUrl,
-                'Referer': `${TS_AUTH_CONFIG.mainUrl}/`
+                'Referer': TS_AUTH_CONFIG.mainUrl + '/'
             }
         });
 
         if (!resp.ok) {
-            throw new Error(`v5 token HTTP ${resp.status}`);
+            throw new Error(`v5-auth token fetch failed: HTTP ${resp.status}`);
         }
 
         const data = await resp.json();
-        const token = data.accessToken || data.access_token;
-
-        if (!token) {
-            throw new Error('No accessToken in v5 response');
-        }
-
-        return token;
+        return data.accessToken || data.access_token || null;
     },
 
     /**
@@ -426,129 +348,19 @@ const AuthTruckstop = {
      * Пишет в тот же ключ `token:truckstop`, что и харвестер — совместимость 100%.
      */
     async _saveToken(token, source, userId) {
-        // Парсим JWT для определения expiry
-        let expiresAt = Date.now() + (TS_AUTH_CONFIG.tokenLifetimeSec * 1000);
-        try {
-            const parts = token.split('.');
-            if (parts.length >= 2) {
-                const payload = JSON.parse(atob(parts[1]));
-                if (payload.exp) {
-                    expiresAt = payload.exp * 1000; // exp в секундах → миллисекунды
-                }
-            }
-        } catch (e) {
-            console.warn('[AIDA/Auth/TS] JWT parse for expiry failed, using default TTL');
-        }
-
+        const now = Date.now();
         const meta = {
-            issuedAt: Date.now(),
-            expiresAt,
+            issuedAt: now,
+            expiresAt: now + (TS_AUTH_CONFIG.tokenLifetimeSec * 1000),
             userId: userId || null,
-            source  // 'login' | 'silent_refresh' | 'harvester'
+            source  // 'login' | 'silent_refresh' | 'harvester' | 'harvester_popup'
         };
-
         await chrome.storage.local.set({
             [STORAGE_KEYS.token]: token,
             [STORAGE_KEYS.tokenMeta]: meta
         });
-
-        console.log(`[AIDA/Auth/TS] Token saved (source: ${source}, expires in ${Math.round((expiresAt - Date.now()) / 1000)}s)`);
-    },
-
-    /**
-     * Парсинг JWT для получения expiry (ms).
-     * Универсальный fallback для токенов без мета-данных.
-     */
-    _getJwtExpiry(token) {
-        try {
-            const parts = token.split('.');
-            if (parts.length < 2) return null;
-            const payload = JSON.parse(atob(parts[1]));
-            if (payload.exp) return payload.exp * 1000;
-            // Если в claims есть expires
-            if (payload.claims?.expires) {
-                return new Date(payload.claims.expires).getTime() || null;
-            }
-            return null;
-        } catch (e) {
-            return null;
-        }
-    },
-
-    /**
-     * Ждём template после получения токена.
-     * Angular SPA на main.truckstop.com загружается и делает GraphQL запрос →
-     * harvester ловит его как TS_SEARCH_REQUEST_CAPTURED → background сохраняет template.
-     * Проверяем storage каждые 2 сек, до 20 сек.
-     */
-    async _waitForTemplate(popupWindowId, timeout, cleanup, resolvedFlag, tokenCaptured, resolve, getResolved, setResolved) {
-        // Правильный ключ: Storage использует namespace-префиксы!
-        const TMPL_KEY = 'settings:truckstopRequestTemplate';
-
-        // Сначала проверяем — может template уже есть
-        const existing = await chrome.storage.local.get(TMPL_KEY);
-        const tmplExist = existing[TMPL_KEY];
-        if (tmplExist && tmplExist.url) {
-            console.log('[AIDA/Auth/TS] Step: template already in storage, closing popup');
-            if (!getResolved()) {
-                setResolved(true);
-                clearTimeout(timeout);
-                cleanup();
-                chrome.windows.remove(popupWindowId).catch(() => { });
-                resolve({ ok: true, token: tokenCaptured });
-            }
-            return;
-        }
-
-        console.log('[AIDA/Auth/TS] Step: waiting for template capture (up to 20s)...');
-        let checks = 0;
-        const maxChecks = 10; // 10 * 2s = 20s
-
-        const checkInterval = setInterval(async () => {
-            checks++;
-            if (getResolved()) {
-                clearInterval(checkInterval);
-                return;
-            }
-
-            const s = await chrome.storage.local.get(TMPL_KEY);
-            const tmpl = s[TMPL_KEY];
-            if (tmpl && tmpl.url) {
-                console.log('[AIDA/Auth/TS] Step: template captured ✓ — closing popup');
-                clearInterval(checkInterval);
-                if (!getResolved()) {
-                    setResolved(true);
-                    clearTimeout(timeout);
-                    cleanup();
-                    chrome.windows.remove(popupWindowId).catch(() => { });
-                    resolve({ ok: true, token: tokenCaptured });
-                }
-                return;
-            }
-
-            if (checks >= maxChecks) {
-                console.warn('[AIDA/Auth/TS] Step: template NOT captured after 20s — closing popup anyway');
-                clearInterval(checkInterval);
-                if (!getResolved()) {
-                    setResolved(true);
-                    clearTimeout(timeout);
-                    cleanup();
-                    chrome.windows.remove(popupWindowId).catch(() => { });
-                    resolve({ ok: true, token: tokenCaptured });
-                }
-            }
-        }, 2000);
-    },
-
-    /**
-     * Генерация nonce для authorize request.
-     */
-    _generateNonce() {
-        const array = new Uint8Array(32);
-        crypto.getRandomValues(array);
-        return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
     }
 };
 
 export default AuthTruckstop;
-export { TS_AUTH_CONFIG, STORAGE_KEYS as TS_STORAGE_KEYS };
+export { TS_AUTH_CONFIG, STORAGE_KEYS };

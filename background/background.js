@@ -536,7 +536,7 @@ async function searchLoads(params) {
     if (!params) throw new Error('No search params');
 
     const datToken = await Storage.getToken('dat');
-    const tsToken = await AuthManager.getToken('truckstop');
+    const tsToken = await Storage.getToken('truckstop');
     const settings = await Storage.getSettings();
     const tsTemplate = settings?.truckstopRequestTemplate || null;
     const tpTemplate = settings?.truckerpathRequestTemplate || null;
@@ -544,13 +544,13 @@ async function searchLoads(params) {
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
     const disabled = settings.disabledBoards || {};
 
-    // Отключённые борды не участвуют в поиске.
-    // DAT и Truckstop — всегда запускаются (у них есть auth-модуль с auto-login).
-    //   Если нет токена → адаптер вернёт AUTH_REQUIRED → autoResolve откроет popup.
-    // TruckerPath — только если есть шаблон (template, нет auth-модуля).
+    // Отключённые борды и борды без настройки не участвуют в поиске.
+    // DAT — всегда запускается (у него есть auth-модуль с auto-login).
+    // Truckstop — только если есть токен.
+    // TruckerPath — только если есть шаблон (template).
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const skipDat = !!disabled.dat;
-    const skipTs = !!disabled.truckstop;
+    const skipTs = !!disabled.truckstop || !tsToken;
     const skipTp = !!disabled.tp || !tpTemplate;
 
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
@@ -625,7 +625,7 @@ async function searchLoads(params) {
                         if (idx !== -1) adapterWarnings.splice(idx, 1);
                     }
                     if (board === 'truckstop' && !disabled.truckstop) {
-                        const freshTsToken = await AuthManager.getToken('truckstop');
+                        const freshTsToken = await Storage.getToken('truckstop');
                         const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, truckstopTemplate: tsTemplate });
                         tsLoads = retryResult?.loads || [];
                         const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
@@ -1022,31 +1022,10 @@ chrome.tabs.onRemoved.addListener(async () => {
 
 chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
 // Keep-alive для SSE создаётся динамически в startLiveQuery() / stopLiveQuery()
-// Truckstop token refresh — TTL 20 мин, обновляем каждые 15 мин
-chrome.alarms.create('aida-ts-refresh', { periodInMinutes: 15 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-cleanup') {
         Storage.pruneHistory().catch(console.warn);
-    }
-    if (alarm.name === 'aida-ts-refresh') {
-        // Авто-обновление Truckstop токена (если подключён)
-        AuthManager.getStatus('truckstop').then(status => {
-            if (status === 'connected' || status === 'expired') {
-                console.log('[AIDA/Core] Alarm: refreshing Truckstop token');
-                AuthManager.silentRefresh('truckstop').then(async (result) => {
-                    if (result.ok) {
-                        console.log('[AIDA/Core] Truckstop token refreshed ✓');
-                        await pushToUI({ settings: await getSettingsForUI() });
-                    } else {
-                        console.warn('[AIDA/Core] Truckstop refresh failed:', result.reason);
-                        if (result.reason === 'session_expired') {
-                            await pushToUI({ settings: await getSettingsForUI() });
-                        }
-                    }
-                }).catch(console.warn);
-            }
-        }).catch(console.warn);
     }
     // keep-alive: просто пробуждает SW; SSE fetch stream продолжит работу
 });

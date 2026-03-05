@@ -198,7 +198,7 @@ const AuthManager = {
             console.log(`[AIDA/Auth] Auto-resolving auth for: ${board} (${error?.code})`);
             const module = AUTH_MODULES[board];
 
-            // Борды без auth-модуля (TP) — НЕ открываем popup автоматически.
+            // Борды без auth-модуля (Truckstop, TP) — НЕ открываем popup автоматически.
             // Popup для них только при ручном клике юзера на кнопку.
             if (!module) {
                 console.log(`[AIDA/Auth] Skipping ${board} — no auth module (auto-popup disabled)`);
@@ -207,10 +207,7 @@ const AuthManager = {
             }
 
             // Шаг 1: silent refresh (если есть auth-модуль)
-            // НЕ пробуем silent refresh для NO_TEMPLATE — он обновляет только токен,
-            // а template захватывается только при открытии страницы Truckstop (popup login).
-            const needsTemplate = error?.code === 'NO_TEMPLATE' || error?.code === 'WRONG_TEMPLATE';
-            if (module && module.silentRefresh && !needsTemplate) {
+            if (module && module.silentRefresh) {
                 console.log(`[AIDA/Auth] Trying silent refresh for ${board}...`);
                 const refreshResult = await module.silentRefresh();
                 if (refreshResult.ok) {
