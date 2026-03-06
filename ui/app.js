@@ -157,12 +157,15 @@ function applyLastSearch(lastSearch) {
     setVal('origin-city', formatCityState(o.city || '', (o.state || '').toUpperCase().slice(0, 2)));
     setVal('dest-city', formatCityState(d.city || '', (d.state || '').toUpperCase().slice(0, 2)));
     setVal('search-radius', lastSearch.radius != null ? lastSearch.radius : 50);
+    if (lastSearch.destRadius != null) setVal('dest-radius', lastSearch.destRadius);
     if (lastSearch.equipment) {
         const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
         setEquipmentChecked(eqArr);
     }
-    if (lastSearch.dateFrom) setVal('date-from', lastSearch.dateFrom);
-    if (lastSearch.dateTo) setVal('date-to', lastSearch.dateTo);
+    // Даты: всегда сегодня (старые даты неактуальны — грузы за прошлые дни не ищутся)
+    const today = new Date().toISOString().split('T')[0];
+    setVal('date-from', today);
+    setVal('date-to', today);
 }
 
 // ============================================================
