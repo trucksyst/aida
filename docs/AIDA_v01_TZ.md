@@ -234,14 +234,16 @@ const Adapter = {
     // ─── Harvester handlers (если нужны) ─────────────────────
 
     /**
-     * Обработка перехваченных грузов от content script (только TP).
+     * ВРЕМЕННО: перехват грузов от content script на вкладке TP.
+     * Будет удалено после исследования и полной отвязки TP от страницы.
      * @param {array} rawResults - сырые данные грузов
      * @param {string} sourceUrl - URL откуда перехвачено
      */
     async handleSearchResponse(rawResults, sourceUrl),
 
     /**
-     * Обработка перехваченного запроса → сохранение как template (только TP).
+     * ВРЕМЕННО: перехват запроса → сохранение как template для replay.
+     * Будет удалено после исследования и полной отвязки TP от страницы.
      * @param {object} msg - { url, method, headers, body }
      */
     async handleRequestCaptured(msg),
