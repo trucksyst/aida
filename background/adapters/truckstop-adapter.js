@@ -228,7 +228,7 @@ async function geocodeOrigin(origin) {
             return null;
         }
         const coords = { lat: parseFloat(first.lat), lon: parseFloat(first.lon) };
-        console.log('[AIDA/Truckstop] Step: geocodeOrigin ok', coords);
+        // geocode ok — не логируем (каждые 30с auto-refresh)
         return coords;
     } catch (e) {
         console.warn('[AIDA/Truckstop] Step: geocodeOrigin error:', e?.message);
@@ -449,7 +449,7 @@ const TruckstopAdapter = {
      * Не требует captured template — только JWT claims + параметры поиска.
      */
     async _searchBuiltIn(params, token, claims) {
-        console.log('[AIDA/Truckstop] Step: using built-in GraphQL (no template)');
+        // built-in GraphQL (единственный путь, не логируем)
 
 
         // Геокодируем origin

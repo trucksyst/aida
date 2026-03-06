@@ -744,7 +744,7 @@ function startLiveQuery(searchId, token, searchParams) {
     console.log('[AIDA/Core] Step: starting SSE liveQuery for searchId:', searchId);
 
     _liveQuerySub = DatAdapter.subscribeLiveQuery(searchId, token, (eventType, data) => {
-        console.log('[AIDA/Core] SSE event:', eventType);
+        // SSE event — не логируем каждый (спамит)
 
         if (eventType.includes('CREATED')) {
             _liveQueryNewCount++;
@@ -832,7 +832,7 @@ async function handleTsAutoRefresh() {
     const claims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
     if (!tsToken || !claims) return;
 
-    console.log('[AIDA/Core] Truckstop auto-refresh: fetching new loads...');
+    // auto-refresh fetch — не логируем каждый цикл
     let result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
 
     // JWT протух → silent refresh → retry
