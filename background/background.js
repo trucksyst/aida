@@ -1,8 +1,9 @@
 /**
  * AIDA v0.1 — Core (Service Worker)
  *
- * Центральная точка расширения. Маршрутизирует команды от UI и харвестеров,
- * агрегирует данные с бордов, управляет бизнес-логикой.
+ * Тонкий оркестратор: маршрутизация команд, adapter registry, CRUD.
+ * Не знает деталей ни одного борда — адаптеры полностью автономны.
+ * Добавление нового борда = 1 файл адаптера + 1 строка в ADAPTERS.
  *
  * Публичный API (через chrome.runtime.sendMessage):
  *   SEARCH_LOADS     { params }           → loads[]
@@ -27,7 +28,27 @@ import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truc
 import AuthManager from './auth/auth-manager.js';
 
 // ============================================================
-// Открытие UI в полноэкранной вкладке (не Side Panel)
+// Adapter Registry — каждый адаптер — чёрный ящик с единым контрактом
+// Добавить новый борд = 1 строка здесь + 1 файл адаптера
+// ============================================================
+
+const ADAPTERS = {
+    dat: { module: DatAdapter, displayName: 'DAT', hasAuthModule: true },
+    truckstop: { module: TruckstopAdapter, displayName: 'Truckstop', hasAuthModule: true },
+    tp: { module: TruckerpathAdapter, displayName: 'TruckerPath', hasAuthModule: false },
+};
+
+/** Получить список активных (не disabled) адаптеров. */
+async function getActiveAdapters() {
+    const settings = await Storage.getSettings();
+    const disabled = settings.disabledBoards || {};
+    return Object.entries(ADAPTERS)
+        .filter(([board]) => !disabled[board])
+        .map(([board, cfg]) => ({ board, ...cfg }));
+}
+
+// ============================================================
+// UI Helpers
 // ============================================================
 
 const AIDA_UI_URL = chrome.runtime.getURL('ui/app.html');
@@ -63,55 +84,44 @@ async function isBoardTabOpen(board) {
     }
 }
 
-/** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (по токенам + вкладкам). */
+/** Собрать настройки для UI: user, openclaw, lastSearch, theme, boardStatus (через registry). */
 async function getSettingsForUI() {
     const settings = await Storage.getSettings();
-    const tpConnected = !!settings?.truckerpathRequestTemplate;
-
-    // Статусы через AuthManager (для DAT — с авто-refresh)
-    const [datStatus, tsStatus] = await Promise.all([
-        AuthManager.getStatus('dat'),
-        AuthManager.getStatus('truckstop')
-    ]);
-
-    // Вкладки бордов — опциональная доп. информация (не обязательны для connected)
-    const [datTabOpen, tsTabOpen, tpTabOpen] = await Promise.all([
-        isBoardTabOpen('dat'),
-        isBoardTabOpen('truckstop'),
-        isBoardTabOpen('tp')
-    ]);
-
     const disabledBoards = settings.disabledBoards || {};
 
-    return {
-        ...settings,
-        boardStatus: {
-            dat: {
-                connected: datStatus === 'connected',
-                status: datStatus,
-                hasToken: datStatus !== 'disconnected',
-                tabOpen: datTabOpen,
-                hasAuthModule: true,
-                disabled: !!disabledBoards.dat
-            },
-            truckstop: {
-                connected: tsStatus === 'connected',
-                status: tsStatus,
-                hasToken: tsStatus !== 'disconnected',
-                tabOpen: tsTabOpen,
-                hasAuthModule: true,
-                disabled: !!disabledBoards.truckstop
-            },
-            tp: {
-                connected: tpConnected,
-                status: tpConnected ? 'connected' : 'disconnected',
-                hasToken: tpConnected,
-                tabOpen: tpTabOpen,
-                hasAuthModule: false,
-                disabled: !!disabledBoards.tp
-            }
+    // Генерируем boardStatus через Adapter Registry
+    const boardStatus = {};
+    const statusPromises = Object.entries(ADAPTERS).map(async ([board, cfg]) => {
+        let status = 'disconnected';
+        let hasToken = false;
+        let tabOpen = false;
+
+        if (cfg.hasAuthModule) {
+            // Адаптеры с auth-модулем — спрашиваем AuthManager
+            status = await AuthManager.getStatus(board);
+            hasToken = status !== 'disconnected';
+        } else {
+            // TP и другие без auth-модуля — по наличию template
+            const templateKey = `${board === 'tp' ? 'truckerpath' : board}RequestTemplate`;
+            hasToken = !!settings[templateKey];
+            status = hasToken ? 'connected' : 'disconnected';
         }
-    };
+
+        tabOpen = await isBoardTabOpen(board);
+
+        boardStatus[board] = {
+            connected: status === 'connected',
+            status,
+            hasToken,
+            tabOpen,
+            hasAuthModule: cfg.hasAuthModule,
+            disabled: !!disabledBoards[board]
+        };
+    });
+
+    await Promise.all(statusPromises);
+
+    return { ...settings, boardStatus };
 }
 
 /** Отправить обновление данных во вкладку UI (push по контракту API). Payload: { loads?, bookmarks?, history?, settings? }. */
@@ -449,26 +459,7 @@ async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
 }
 
-async function handleTruckstopRequestCaptured(msg) {
-    if (!msg || !msg.url) return;
-    if (msg.url.indexOf('LoadSearchCount') !== -1 || msg.url.indexOf('searchCount') !== -1) return;
-    const template = {
-        url: msg.url,
-        method: msg.method || 'POST',
-        headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : {},
-        body: typeof msg.body === 'string' ? msg.body : (msg.body ? JSON.stringify(msg.body) : null),
-        capturedAt: new Date().toISOString()
-    };
-    let cookies = [];
-    try {
-        const tsCookies = await chrome.cookies.getAll({ domain: 'truckstop.com' });
-        const mainCookies = await chrome.cookies.getAll({ domain: 'main.truckstop.com' });
-        const apiCookies = await chrome.cookies.getAll({ domain: 'loadsearch-graphql-api-prod.truckstop.com' });
-        cookies = [...tsCookies, ...mainCookies, ...apiCookies];
-    } catch (_) { }
-    template.cookies = cookies;
-    await Storage.saveSettings({ truckstopRequestTemplate: template });
-}
+// handleTruckstopRequestCaptured — удалён (адаптер автономен, GraphQL built-in)
 
 async function handleTruckerpathRequestCaptured(msg) {
     if (!msg || !msg.url) return;
@@ -516,146 +507,121 @@ async function fetchDatProfile(token) {
 }
 
 // ============================================================
-// searchLoads — главный метод
+// searchLoads — тонкий оркестратор через Adapter Registry
 // ============================================================
 
 /**
  * Параллельный поиск по всем подключённым бордам.
- * Дедупликация по origin.city + destination.city + pickupDate + broker.phone.
+ * Core не знает деталей — вызывает adapter.search(params).
  */
 async function searchLoads(params) {
     if (!params) throw new Error('No search params');
 
-    // Токены через AuthManager (§18 ТЗ: агрессивный refresh at every use)
     const settings = await Storage.getSettings();
+    const disabled = settings.disabledBoards || {};
+
+    // --- 1. Параллельно вызываем .search() для каждого активного борда ---
+    const boards = Object.keys(ADAPTERS);
+    const skipResult = { ok: true, loads: [], meta: { skipped: true } };
+
+    // TP ещё не автономен — нужен контекст (template + cachedLoads)
     const tpTemplate = settings?.truckerpathRequestTemplate || null;
     const existing = await Storage.getLoads();
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
-    const disabled = settings.disabledBoards || {};
 
-    // Отключённые борды и борды без настройки не участвуют в поиске.
-    const skipResult = { ok: true, loads: [], meta: { skipped: true } };
-    const skipDat = !!disabled.dat;
-    const skipTs = !!disabled.truckstop;
-    const skipTp = !!disabled.tp;
+    const searchPromises = boards.map(board => {
+        if (disabled[board]) return Promise.resolve(skipResult);
+        const adapter = ADAPTERS[board].module;
 
-    const [datResult, tsResult, tpResult] = await Promise.allSettled([
-        skipDat ? Promise.resolve(skipResult) : DatAdapter.search(params),
-        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params),
-        skipTp ? Promise.resolve(skipResult) : TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
-    ]);
+        // TP — передаём контекст (deferred autonomy)
+        if (board === 'tp') {
+            return adapter.search(params, { cachedLoads: tpCached, template: tpTemplate });
+        }
+        return adapter.search(params);
+    });
 
-    // Логируем ошибки адаптеров (не проглатываем молча)
+    const results = await Promise.allSettled(searchPromises);
+
+    // --- 2. Собираем loads, warnings, auth errors ---
     const adapterWarnings = [];
-    const authErrors = [];    // борды с AUTH_REQUIRED для auto-resolve
+    const authErrors = [];
+    const boardLoads = {}; // { board: loads[] }
 
-    const datRaw = datResult.status === 'fulfilled' ? datResult.value : {};
-    if (datResult.status === 'rejected') {
-        console.warn('[AIDA/Core] DAT adapter error:', datResult.reason?.message);
-        adapterWarnings.push('DAT: ' + (datResult.reason?.message || 'error'));
-    } else if (datRaw?.error) {
-        console.warn('[AIDA/Core] DAT adapter returned error:', datRaw.error);
-        adapterWarnings.push('DAT: ' + (datRaw.error.message || datRaw.error));
-        if (datRaw.error.code === 'AUTH_REQUIRED') {
-            authErrors.push({ board: 'dat', error: datRaw.error });
+    boards.forEach((board, i) => {
+        const displayName = ADAPTERS[board].displayName;
+        const result = results[i];
+
+        if (result.status === 'rejected') {
+            console.warn(`[AIDA/Core] ${displayName} adapter error:`, result.reason?.message);
+            adapterWarnings.push(`${displayName}: ${result.reason?.message || 'error'}`);
+            boardLoads[board] = [];
+            return;
         }
-    }
-    let datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
 
-    const tsRaw = tsResult.status === 'fulfilled' ? tsResult.value : {};
-    if (tsResult.status === 'rejected') {
-        console.warn('[AIDA/Core] Truckstop adapter error:', tsResult.reason?.message);
-        adapterWarnings.push('Truckstop: ' + (tsResult.reason?.message || 'error'));
-    } else if (tsRaw?.error) {
-        console.warn('[AIDA/Core] Truckstop adapter returned error:', tsRaw.error);
-        adapterWarnings.push('Truckstop: ' + (tsRaw.error.message || tsRaw.error));
-        if (tsRaw.error.code === 'AUTH_REQUIRED' || tsRaw.error.code === 'NO_CLAIMS' || tsRaw.error.code === 'NO_TEMPLATE' || tsRaw.error.code === 'WRONG_TEMPLATE') {
-            authErrors.push({ board: 'truckstop', error: tsRaw.error });
+        const raw = result.value || {};
+        if (raw?.error) {
+            console.warn(`[AIDA/Core] ${displayName} adapter returned error:`, raw.error);
+            adapterWarnings.push(`${displayName}: ${raw.error.message || raw.error}`);
+            const authCodes = ['AUTH_REQUIRED', 'NO_CLAIMS', 'NO_TEMPLATE', 'WRONG_TEMPLATE'];
+            if (authCodes.includes(raw.error.code)) {
+                authErrors.push({ board, error: raw.error });
+            }
         }
-    }
-    let tsLoads = tsRaw?.loads || (Array.isArray(tsRaw) ? tsRaw : []);
+        boardLoads[board] = raw?.loads || (Array.isArray(raw) ? raw : []);
+    });
 
-    const tpRaw = tpResult.status === 'fulfilled' ? tpResult.value : {};
-    if (tpResult.status === 'rejected') {
-        console.warn('[AIDA/Core] TruckerPath adapter error:', tpResult.reason?.message);
-        adapterWarnings.push('TruckerPath: ' + (tpResult.reason?.message || 'error'));
-    } else if (tpRaw?.error) {
-        console.warn('[AIDA/Core] TruckerPath adapter returned error:', tpRaw.error);
-        adapterWarnings.push('TruckerPath: ' + (tpRaw.error.message || tpRaw.error));
-        if (tpRaw.error.code === 'AUTH_REQUIRED' || tpRaw.error.code === 'NO_TEMPLATE' || tpRaw.error.code === 'WRONG_TEMPLATE') {
-            authErrors.push({ board: 'tp', error: tpRaw.error });
-        }
-    }
-    let tpLoads = tpRaw?.loads || (Array.isArray(tpRaw) ? tpRaw : []);
-
-    // ---- AUTO-RESOLVE AUTH ERRORS ----
-    // Фильтруем disabled борды — для них НЕ открываем попы, НЕ делаем запросы
+    // --- 3. Auto-resolve auth errors → retry ---
     const activeAuthErrors = authErrors.filter(e => !disabled[e.board]);
     if (activeAuthErrors.length > 0) {
         console.log(`[AIDA/Core] Auth errors from ${activeAuthErrors.length} board(s):`, activeAuthErrors.map(e => e.board));
         const { resolved } = await AuthManager.autoResolveAuthErrors(activeAuthErrors);
 
-        // Retry ТОЛЬКО борды, которые удалось авторизовать
         if (resolved.length > 0) {
             console.log('[AIDA/Core] Re-trying boards after auth resolve:', resolved);
-
             for (const board of resolved) {
+                if (disabled[board]) continue;
                 try {
-                    if (board === 'dat' && !disabled.dat) {
-                        const retryResult = await DatAdapter.search(params);
-                        datLoads = retryResult?.loads || (Array.isArray(retryResult) ? retryResult : []);
-                        // Убираем warning DAT из списка (успешно авторизовались)
-                        const idx = adapterWarnings.findIndex(w => w.startsWith('DAT:'));
-                        if (idx !== -1) adapterWarnings.splice(idx, 1);
-                    }
-                    if (board === 'truckstop' && !disabled.truckstop) {
-                        const retryResult = await TruckstopAdapter.search(params);
-                        tsLoads = retryResult?.loads || [];
-                        const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
-                        if (idx !== -1) adapterWarnings.splice(idx, 1);
-                    }
-                    if (board === 'tp' && !disabled.tp) {
-                        const retryResult = await TruckerpathAdapter.search(params, { cachedLoads: [], template: tpTemplate });
-                        tpLoads = retryResult?.loads || [];
-                        const idx = adapterWarnings.findIndex(w => w.startsWith('TruckerPath:'));
-                        if (idx !== -1) adapterWarnings.splice(idx, 1);
-                    }
+                    const adapter = ADAPTERS[board].module;
+                    const displayName = ADAPTERS[board].displayName;
+                    const retryResult = board === 'tp'
+                        ? await adapter.search(params, { cachedLoads: [], template: tpTemplate })
+                        : await adapter.search(params);
+                    boardLoads[board] = retryResult?.loads || [];
+                    const idx = adapterWarnings.findIndex(w => w.startsWith(`${displayName}:`));
+                    if (idx !== -1) adapterWarnings.splice(idx, 1);
                 } catch (e) {
                     console.warn(`[AIDA/Core] Retry ${board} after auth failed:`, e.message);
                 }
             }
-
-            // Обновляем статусы UI после авторизации
             await pushToUI({ settings: await getSettingsForUI() });
         }
     }
 
-    const allLoads = [...(Array.isArray(datLoads) ? datLoads : []), ...(Array.isArray(tsLoads) ? tsLoads : []), ...(Array.isArray(tpLoads) ? tpLoads : [])];
-    const loads = allLoads;
+    // --- 4. Мерж всех грузов ---
+    const loads = boards.flatMap(board => {
+        const arr = boardLoads[board];
+        return Array.isArray(arr) ? arr : [];
+    });
 
     await Storage.clearActive();
     await Storage.setLoads(loads);
     _searchCooldownUntil = Date.now() + SEARCH_COOLDOWN_MS;
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
-
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });
 
-    // DAT SSE realtime: адаптер сам запускает SSE (использует searchId/token из последнего search)
-    if (!skipDat) {
-        DatAdapter.startRealtime(params, (event) => handleDatRealtimeUpdate(event, params));
-    } else {
-        DatAdapter.stopRealtime();
+    // --- 5. Запуск realtime для каждого борда (адаптер решает что делать) ---
+    for (const board of boards) {
+        const adapter = ADAPTERS[board].module;
+        if (!adapter.startRealtime) continue; // TP пока не поддерживает
+
+        if (!disabled[board]) {
+            adapter.startRealtime(params, (event) => handleRealtimeUpdate(board, event, params));
+        } else {
+            if (adapter.stopRealtime) adapter.stopRealtime();
+        }
     }
 
-    // Truckstop auto-refresh: адаптер сам управляет alarm
-    if (!skipTs) {
-        TruckstopAdapter.startRealtime(params, (newLoads) => handleTsRealtimeUpdate(newLoads));
-    } else {
-        TruckstopAdapter.stopRealtime();
-    }
-
-    // Возвращаем loads и warnings для UI
     return { loads, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
 }
 
@@ -690,47 +656,46 @@ async function loadMoreLoads() {
 }
 
 // ============================================================
-// DAT Realtime Update callback (SSE)
+// Generic Realtime Update callback — для всех адаптеров
 // ============================================================
 
 /**
- * Callback для DatAdapter.startRealtime() — обрабатывает события SSE.
- * @param {{ type: 'newCount'|'refresh', newLoadsCount?, params? }} event
- * @param {object} searchParams — параметры последнего поиска
+ * Unified callback для adapter.startRealtime().
+ * DAT: event = { type: 'newCount'|'refresh', newLoadsCount?, params? }
+ * Truckstop: event = loads[] (массив новых грузов)
  */
-async function handleDatRealtimeUpdate(event, searchParams) {
-    if (event.type === 'newCount') {
+async function handleRealtimeUpdate(board, event, searchParams) {
+    const displayName = ADAPTERS[board]?.displayName || board;
+
+    // DAT-стиль: { type: 'newCount', newLoadsCount } или { type: 'refresh', params }
+    if (event?.type === 'newCount') {
         await pushToUI({ newLoadsCount: event.newLoadsCount });
-    } else if (event.type === 'refresh') {
+        return;
+    }
+    if (event?.type === 'refresh') {
         await pushToUI({ newLoadsCount: 0 });
         try {
             await searchLoads(event.params || searchParams);
         } catch (e) {
-            console.warn('[AIDA/Core] DAT SSE auto-refresh failed:', e.message);
+            console.warn(`[AIDA/Core] ${displayName} realtime auto-refresh failed:`, e.message);
         }
+        return;
     }
-}
 
-// ============================================================
-// Truckstop Realtime Update callback
-// ============================================================
+    // Truckstop-стиль: event = loads[] (массив новых грузов)
+    if (Array.isArray(event) && event.length > 0) {
+        const existing = await Storage.getLoads();
+        const existingIds = new Set(existing.map(l => l.id));
+        const newLoads = event.filter(l => !existingIds.has(l.id));
 
-/** Callback для TruckstopAdapter.startRealtime() — обрабатывает новые грузы от auto-refresh. */
-async function handleTsRealtimeUpdate(newTsLoads) {
-    if (!Array.isArray(newTsLoads) || newTsLoads.length === 0) return;
+        if (newLoads.length === 0) return;
 
-    // Сравниваем по ID — добавляем только новые
-    const existing = await Storage.getLoads();
-    const existingIds = new Set(existing.map(l => l.id));
-    const newLoads = newTsLoads.filter(l => !existingIds.has(l.id));
-
-    if (newLoads.length === 0) return;
-
-    console.log(`[AIDA/Core] Truckstop auto-refresh: +${newLoads.length} new loads`);
-    const merged = [...newLoads, ...existing]; // новые наверх
-    await Storage.setLoads(merged);
-    const newLoadIds = newLoads.map(l => l.id);
-    await pushToUI({ loads: merged, newLoadsCount: newLoads.length, newLoadIds });
+        console.log(`[AIDA/Core] ${displayName} auto-refresh: +${newLoads.length} new loads`);
+        const merged = [...newLoads, ...existing]; // новые наверх
+        await Storage.setLoads(merged);
+        const newLoadIds = newLoads.map(l => l.id);
+        await pushToUI({ loads: merged, newLoadsCount: newLoads.length, newLoadIds });
+    }
 }
 
 // ============================================================
@@ -1012,7 +977,7 @@ chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
 // Проактивный refresh JWT Truckstop — каждые 15 мин ДО истечения токена.
 // Устраняет необходимость popup-логина (§18 ТЗ).
 chrome.alarms.create('aida-ts-proactive-refresh', { periodInMinutes: 15 });
-// Keep-alive для SSE создаётся динамически в startLiveQuery() / stopLiveQuery()
+// Keep-alive для SSE создаётся динамически в DatAdapter.startRealtime() / stopRealtime()
 
 chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-cleanup') {
