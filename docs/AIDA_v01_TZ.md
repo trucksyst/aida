@@ -186,25 +186,12 @@ const Adapter = {
     /**
      * Поиск грузов по параметрам.
      * Адаптер сам берёт токен, делает запрос к API, нормализует ответ.
+     * Автоматически запускает realtime-подписку на новые грузы.
+     * При повторном вызове — предыдущая подписка автоматически закрывается.
      * @param {object} params - { origin, destination, equipment, radius, dateFrom, dateTo }
      * @returns {{ ok: boolean, loads: Load[], meta?: object, error?: { code, message } }}
      */
     async search(params),
-
-    /**
-     * Подписка на новые грузы в реальном времени (опционально).
-     * DAT: SSE-поток от API, слушает events CREATED/UPDATED/DELETED.
-     * Truckstop: alarm-based polling каждые 30 сек.
-     * Вызывает onUpdate(event) при появлении новых грузов.
-     * @param {object} params - параметры поиска (для refresh)
-     * @param {function} onUpdate - callback: (event) => void
-     *   DAT event:  { type: 'newCount', newLoadsCount } или { type: 'refresh', params }
-     *   TS event:   loads[] (массив новых грузов)
-     */
-    startRealtime(params, onUpdate),
-
-    /** Остановить realtime-подписку, очистить таймеры и алармы. */
-    stopRealtime(),
 
     /**
      * Дозагрузка (infinite scroll / пагинация).
@@ -213,6 +200,15 @@ const Adapter = {
      * @returns {{ ok: boolean, loads: Load[], hasMore: boolean }}
      */
     async loadMore(),
+
+    /**
+     * Зарегистрировать callback для realtime updates (один раз при старте).
+     * Адаптер вызывает fn(board, event) при появлении новых грузов.
+     * DAT: SSE → event = { type: 'newCount'|'refresh', ... }
+     * TS: alarm polling → event = loads[]
+     * @param {function} fn - callback(board, event)
+     */
+    setRealtimeCallback(fn),
 
     // ─── Авторизация ─────────────────────────────────────────
 

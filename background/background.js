@@ -38,6 +38,13 @@ const ADAPTERS = {
     tp: { module: TruckerpathAdapter, displayName: 'TruckerPath', hasAuthModule: false },
 };
 
+// Регистрируем callback для realtime updates (один раз при старте)
+for (const [board, cfg] of Object.entries(ADAPTERS)) {
+    if (cfg.module.setRealtimeCallback) {
+        cfg.module.setRealtimeCallback(handleRealtimeUpdate);
+    }
+}
+
 /** Получить список активных (не disabled) адаптеров. */
 async function getActiveAdapters() {
     const settings = await Storage.getSettings();
@@ -456,18 +463,6 @@ async function searchLoads(params) {
     await Storage.saveSettings({ ...settings, lastSearch: params });
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });
 
-    // --- 5. Запуск realtime для каждого борда (адаптер решает что делать) ---
-    for (const board of boards) {
-        const adapter = ADAPTERS[board].module;
-        if (!adapter.startRealtime) continue; // TP пока не поддерживает
-
-        if (!disabled[board]) {
-            adapter.startRealtime(params, (event) => handleRealtimeUpdate(board, event, params));
-        } else {
-            if (adapter.stopRealtime) adapter.stopRealtime();
-        }
-    }
-
     return { loads, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
 }
 
@@ -502,15 +497,15 @@ async function loadMoreLoads() {
 }
 
 // ============================================================
-// Generic Realtime Update callback — для всех адаптеров
+// handleRealtimeUpdate — вызывается адаптерами через setRealtimeCallback
 // ============================================================
 
 /**
- * Unified callback для adapter.startRealtime().
+ * Unified callback для realtime updates от адаптеров.
  * DAT: event = { type: 'newCount'|'refresh', newLoadsCount?, params? }
  * Truckstop: event = loads[] (массив новых грузов)
  */
-async function handleRealtimeUpdate(board, event, searchParams) {
+async function handleRealtimeUpdate(board, event) {
     const displayName = ADAPTERS[board]?.displayName || board;
 
     // DAT-стиль: { type: 'newCount', newLoadsCount } или { type: 'refresh', params }
@@ -521,7 +516,7 @@ async function handleRealtimeUpdate(board, event, searchParams) {
     if (event?.type === 'refresh') {
         await pushToUI({ newLoadsCount: 0 });
         try {
-            await searchLoads(event.params || searchParams);
+            await searchLoads(event.params);
         } catch (e) {
             console.warn(`[AIDA/Core] ${displayName} realtime auto-refresh failed:`, e.message);
         }
@@ -787,7 +782,7 @@ chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
 // Проактивный refresh JWT Truckstop — каждые 15 мин ДО истечения токена.
 // Устраняет необходимость popup-логина (§18 ТЗ).
 chrome.alarms.create('aida-ts-proactive-refresh', { periodInMinutes: 15 });
-// Keep-alive для SSE создаётся динамически в DatAdapter.startRealtime() / stopRealtime()
+// Keep-alive для SSE создаётся внутри DatAdapter._startSSE() / _stopSSE()
 
 chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-cleanup') {

@@ -4,8 +4,7 @@
  * Полностью автономный адаптер — чёрный ящик.
  * Сам берёт токен через AuthManager, сам управляет SSE realtime.
  * Core не знает деталей — только вызывает единый контракт:
- *   search(params), startRealtime(params, onUpdate), stopRealtime(),
- *   getStatus(), login(), disconnect()
+ *   search(params), getStatus(), login(), disconnect(), fetchProfile()
  *
  * Rate limit: 1 запрос / 2 секунды.
  */
@@ -94,6 +93,9 @@ async function rateLimit() {
  * @returns {Promise<Load[]>} Нормализованные карточки грузов
  */
 async function search(params) {
+    // Останавливаем предыдущую SSE-подписку
+    DatAdapter._stopSSE();
+
     const token = await AuthManager.getToken('dat');
     if (!token) {
         console.warn('[AIDA/DAT] No token available');
@@ -198,7 +200,6 @@ async function search(params) {
     const searchId = root?.searchId || null;
     if (searchId) {
         console.log('[AIDA/DAT] searchId for SSE:', searchId);
-        // Сохраняем для startRealtime() — адаптер сам подпишется на SSE
         DatAdapter._lastSearchId = searchId;
         DatAdapter._lastSearchToken = token;
     }
@@ -206,6 +207,12 @@ async function search(params) {
     const results = rawList.filter(r => r && typeof r === 'object').map(r => normalize(r)).filter(Boolean);
     if (rawList.length > 0 && results.length === 0) {
         console.warn('[AIDA/DAT] No items normalized, sample raw:', JSON.stringify(rawList[0]).slice(0, 300));
+    }
+
+    // Автоматически стартуем SSE подписку на новые грузы
+    if (searchId) {
+        DatAdapter._realtimeParams = params;
+        DatAdapter._startSSE();
     }
 
     return { ok: true, loads: results, searchId, token, meta: { board: 'dat' } };
@@ -841,22 +848,24 @@ const DatAdapter = {
     LIVE_QUERY_PUSH_DELAY: 3_000,
 
     /**
-     * Запустить SSE realtime подписку на новые грузы.
-     * @param {object} params — параметры поиска (searchId и token из последнего search)
-     * @param {function} onUpdate — callback({ newLoadsCount }) при SSE событиях
+     * Зарегистрировать callback для realtime updates.
+     * Вызывается один раз при инициализации из Core.
+     * @param {function} fn — callback(board, event)
      */
-    startRealtime(params, onUpdate) {
-        this.stopRealtime();
+    setRealtimeCallback(fn) {
+        this._onRealtimeUpdate = fn;
+    },
+
+    // ─── Внутренние методы SSE (не публичные) ────────────────
+
+    _startSSE() {
+        this._stopSSE();
         if (!this._lastSearchId || !this._lastSearchToken) return;
 
-        this._realtimeParams = params;
-        this._onUpdate = onUpdate;
         this._liveQueryNewCount = 0;
-
-        // Keep-alive alarm для SSE
         chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
 
-        console.log('[AIDA/DAT] Step: starting SSE liveQuery for searchId:', this._lastSearchId);
+        console.log('[AIDA/DAT] SSE: starting liveQuery for searchId:', this._lastSearchId);
 
         const self = this;
         this._liveQuerySub = subscribeLiveQuery(this._lastSearchId, this._lastSearchToken, (eventType, data) => {
@@ -865,8 +874,8 @@ const DatAdapter = {
                 if (!self._liveQueryPushTimer) {
                     self._liveQueryPushTimer = setTimeout(() => {
                         self._liveQueryPushTimer = null;
-                        if (self._onUpdate) {
-                            self._onUpdate({ type: 'newCount', newLoadsCount: self._liveQueryNewCount });
+                        if (self._onRealtimeUpdate) {
+                            self._onRealtimeUpdate('dat', { type: 'newCount', newLoadsCount: self._liveQueryNewCount });
                         }
                     }, self.LIVE_QUERY_PUSH_DELAY);
                 }
@@ -879,7 +888,7 @@ const DatAdapter = {
         });
     },
 
-    stopRealtime() {
+    _stopSSE() {
         if (this._liveQuerySub) {
             this._liveQuerySub.stop();
             this._liveQuerySub = null;
@@ -893,8 +902,6 @@ const DatAdapter = {
             this._liveQueryPushTimer = null;
         }
         this._liveQueryNewCount = 0;
-        this._realtimeParams = null;
-        this._onUpdate = null;
         chrome.alarms.clear('aida-keepalive').catch(() => { });
     },
 
@@ -907,9 +914,8 @@ const DatAdapter = {
             console.log('[AIDA/DAT] SSE: auto-refreshing after', self._liveQueryNewCount, 'new events');
             self._liveQueryNewCount = 0;
             if (self._liveQueryPushTimer) { clearTimeout(self._liveQueryPushTimer); self._liveQueryPushTimer = null; }
-            // Сообщаем Core что нужно обновить (сброс счётчика + полный refresh)
-            if (self._onUpdate) {
-                self._onUpdate({ type: 'refresh', params: self._realtimeParams });
+            if (self._onRealtimeUpdate) {
+                self._onRealtimeUpdate('dat', { type: 'refresh', params: self._realtimeParams });
             }
         }, this.LIVE_QUERY_REFRESH_DELAY);
     },
@@ -933,7 +939,7 @@ const DatAdapter = {
     },
 
     async disconnect() {
-        this.stopRealtime();
+        this._stopSSE();
         return AuthManager.disconnect('dat');
     },
 

@@ -410,7 +410,13 @@ const TruckstopAdapter = {
         this._offset = 0;
         this._lastParams = params;
 
-        return this._searchBuiltIn(params, auth.token, auth.claims);
+        const result = await this._searchBuiltIn(params, auth.token, auth.claims);
+
+        // Автоматически стартуем polling на новые грузы
+        this._realtimeParams = params;
+        this._startPolling();
+
+        return result;
     },
 
     /**
@@ -663,31 +669,31 @@ const TruckstopAdapter = {
         return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
     },
 
-    // ============================================================
-    // Realtime (auto-refresh via alarm) — полностью внутри адаптера
-    // ============================================================
-
     /**
-     * Запустить auto-refresh polling.
-     * @param {object} params — параметры поиска
-     * @param {function} onUpdate — callback(newLoads[]) при появлении новых грузов
+     * Зарегистрировать callback для realtime updates.
+     * Вызывается один раз при инициализации из Core.
+     * @param {function} fn — callback(board, event)
      */
-    startRealtime(params, onUpdate) {
-        this._realtimeParams = params;
-        this._onUpdate = onUpdate;
+    setRealtimeCallback(fn) {
+        this._onRealtimeUpdate = fn;
+    },
+
+    // ─── Внутренние методы polling (не публичные) ─────────────
+
+    _startPolling() {
+        this._stopPolling();
         chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
         console.log('[AIDA/Truckstop] auto-refresh started (every 30s)');
     },
 
-    stopRealtime() {
+    _stopPolling() {
         this._realtimeParams = null;
-        this._onUpdate = null;
         chrome.alarms.clear(TS_REFRESH_ALARM).catch(() => { });
     },
 
     /**
      * Обработчик alarm — вызывается из Core alarm router.
-     * Делает refreshNew() и вызывает onUpdate callback с новыми грузами.
+     * Делает refreshNew() и вызывает callback с новыми грузами.
      */
     async handleAlarm() {
         if (!this._realtimeParams) return;
@@ -706,8 +712,8 @@ const TruckstopAdapter = {
         if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
 
         // Вызываем callback — Core решит что делать с новыми грузами
-        if (this._onUpdate) {
-            this._onUpdate(result.loads);
+        if (this._onRealtimeUpdate) {
+            this._onRealtimeUpdate(BOARD, result.loads);
         }
     },
 
