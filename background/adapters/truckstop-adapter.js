@@ -535,12 +535,9 @@ const TruckstopAdapter = {
         }
 
         const body = JSON.stringify({
-            // ТЕСТ: sort_by_updated_on_desc вместо bin_rate_desc — свежие грузы как на сайте TS.
-            // Было: LoadSearchSortByBinRateDesc + BUILTIN_GRAPHQL_QUERY (sort by rate).
-            // UI-сортировка по колонкам не затрагивается.
-            operationName: 'LoadSearchSortByUpdatedOnDesc',
+            operationName: 'LoadSearchSortByBinRateDesc',
             variables: { args, isPro: false },
-            query: BUILTIN_GRAPHQL_QUERY_UPDATED
+            query: BUILTIN_GRAPHQL_QUERY
         });
 
         const headers = {
