@@ -33,6 +33,7 @@ const state = {
 
 /** Каскад свежести: Map<loadId, waveLevel> (0 = самые новые, 1 = предыдущая волна) */
 const _waveMap = new Map();
+let _skipNextWave = true; // первый DATA_UPDATED после поиска — без подсветки
 
 /** Сдвинуть волны: 0→1, 1→удалить. Новые ID помечаются как wave 0. */
 function updateWaves(newLoads, prevLoadIds) {
@@ -202,9 +203,13 @@ function onDataUpdated(message) {
     const p = message.payload;
     let updated = [];
     if (p.loads !== undefined) {
-        const prevIds = new Set(state.loads.map(l => l.id));
+        if (_skipNextWave) {
+            _skipNextWave = false;
+        } else {
+            const prevIds = new Set(state.loads.map(l => l.id));
+            updateWaves(p.loads, prevIds);
+        }
         state.loads = p.loads;
-        updateWaves(p.loads, prevIds);
         updated.push('loads');
         renderTable();
         updateStatusBar();
@@ -873,6 +878,7 @@ async function doSearch() {
     showTableLoading(true);
     _hasMoreLoads = true; // сброс пагинации
     _waveMap.clear();     // сброс каскада свежести
+    _skipNextWave = true; // первый DATA_UPDATED после поиска — без подсветки
 
     try {
         console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');

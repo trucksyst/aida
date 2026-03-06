@@ -295,7 +295,7 @@ function normalizeTruckstopRaw(raw) {
 
     const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? '');
     const pickupDate = originEarly ? originEarly.split('T')[0] : '';
-    const postedAt = str(raw.updatedOn ?? raw.createdOn ?? raw.postedAt ?? '');
+    const postedAt = str(raw.updatedOn || raw.createdOn || raw.postedAt || '');
     if (!postedAt && raw._debugPosted === undefined) {
         console.log('[AIDA/Truckstop] DEBUG postedAt empty. Raw keys with dates:',
             Object.keys(raw).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('time') || k.toLowerCase().includes('created') || k.toLowerCase().includes('updated') || k.toLowerCase().includes('posted')),
