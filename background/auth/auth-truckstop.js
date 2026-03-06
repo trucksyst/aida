@@ -242,9 +242,10 @@ const AuthTruckstop = {
 
     /**
      * Получить актуальный токен.
-     * Если токен есть и не истёк — вернуть его.
-     * Если истекает скоро — попробовать silent refresh.
-     * Если нет токена — вернуть null.
+     * Стратегия «Refresh at every use» (§18 ТЗ):
+     * - Токен жив → вернуть + silentRefresh() fire-and-forget (к следующему запросу будет свежий)
+     * - Токен протух → блокирующий silentRefresh() → вернуть свежий
+     * - Токена нет → null
      */
     async getToken() {
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
@@ -253,26 +254,28 @@ const AuthTruckstop = {
 
         if (!token) return null;
 
-        // Проверяем срок действия
+        // Валидация: если в Storage лежит не-JWT — удалить и вернуть null
+        if (!this._isValidJwt(token)) {
+            console.warn('[AIDA/Auth/TS] getToken: stored token is not valid JWT, clearing');
+            await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
+            return null;
+        }
+
         if (meta?.expiresAt) {
             const now = Date.now();
-            const refreshThreshold = (TS_AUTH_CONFIG.refreshBeforeExpirySec * 1000);
 
             if (now >= meta.expiresAt) {
-                // Токен истёк — пробуем silent refresh
+                // Токен протух → блокирующий refresh
                 console.log('[AIDA/Auth/TS] Token expired, attempting silent refresh');
                 const result = await this.silentRefresh();
                 if (result.ok) return result.token;
                 return null;
             }
-
-            if (now >= meta.expiresAt - refreshThreshold) {
-                // Токен скоро истечёт — обновляем в фоне (не блокируем)
-                console.log('[AIDA/Auth/TS] Token expiring soon, refreshing in background');
-                this.silentRefresh().catch(console.warn);
-            }
         }
 
+        // Токен жив → вернуть + refresh в фоне (fire-and-forget)
+        // К следующему запросу токен будет гарантированно свежий
+        this.silentRefresh().catch(() => { });
         return token;
     },
 

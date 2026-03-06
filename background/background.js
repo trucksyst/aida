@@ -524,8 +524,8 @@ async function fetchDatProfile(token) {
 async function searchLoads(params) {
     if (!params) throw new Error('No search params');
 
-    const datToken = await Storage.getToken('dat');
-    const tsToken = await Storage.getToken('truckstop');
+    // Токены через AuthManager (§18 ТЗ: агрессивный refresh at every use)
+    const tsToken = await AuthManager.getToken('truckstop');
     const settings = await Storage.getSettings();
     const tsTemplate = settings?.truckstopRequestTemplate || null;
     const tpTemplate = settings?.truckerpathRequestTemplate || null;
@@ -537,7 +537,7 @@ async function searchLoads(params) {
 
     // Отключённые борды и борды без настройки не участвуют в поиске.
     // DAT — всегда запускается (у него есть auth-модуль с auto-login).
-    // Truckstop — только если есть токен.
+    // Truckstop — только если есть токен (AuthManager.getToken проверяет + refresh).
     // TruckerPath — только если есть шаблон (template).
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const skipDat = !!disabled.dat;
@@ -546,7 +546,7 @@ async function searchLoads(params) {
 
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
         skipDat ? Promise.resolve(skipResult) : DatAdapter.search(params),
-        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, truckstopTemplate: tsTemplate, claims: tsClaims }),
+        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, claims: tsClaims }),
         skipTp ? Promise.resolve(skipResult) : TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
@@ -771,7 +771,8 @@ async function handleTsAutoRefresh() {
         return;
     }
 
-    const tsToken = await Storage.getToken('truckstop');
+    // Токен через AuthManager — агрессивный refresh (§18 ТЗ)
+    const tsToken = await AuthManager.getToken('truckstop');
     const claims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
     if (!tsToken || !claims) return;
 
@@ -1121,12 +1122,24 @@ chrome.alarms.onAlarm.addListener(alarm => {
 async function init() {
     console.log('[AIDA/Core] Service Worker started');
 
+    // Проактивный refresh токенов всех connected бордов при старте (§18 ТЗ)
+    try {
+        const boards = ['truckstop', 'dat'];
+        for (const board of boards) {
+            const status = await AuthManager.getStatus(board);
+            if (status !== 'disconnected') {
+                console.log(`[AIDA/Core] Init: refreshing token for ${board}...`);
+                AuthManager.getToken(board).catch(() => { });
+            }
+        }
+    } catch (e) {
+        console.warn('[AIDA/Core] Init: token refresh error:', e.message);
+    }
+
     const settings = await Storage.getSettings();
     if (settings.openclaw?.enabled) {
         startPolling();
     }
-
-
 }
 
 init().catch(console.error);
