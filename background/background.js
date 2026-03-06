@@ -858,7 +858,8 @@ async function handleTsAutoRefresh() {
     console.log(`[AIDA/Core] Truckstop auto-refresh: +${newLoads.length} new loads`);
     const merged = [...newLoads, ...existing]; // новые наверх
     await Storage.setLoads(merged);
-    await pushToUI({ loads: merged, newLoadsCount: newLoads.length });
+    const newLoadIds = newLoads.map(l => l.id);
+    await pushToUI({ loads: merged, newLoadsCount: newLoads.length, newLoadIds });
 }
 
 // ============================================================

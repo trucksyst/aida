@@ -33,11 +33,10 @@ const state = {
 
 /** Каскад свежести: Map<loadId, waveLevel> (0 = самые новые, 1 = предыдущая волна) */
 const _waveMap = new Map();
-let _skipNextWave = true; // первый DATA_UPDATED после поиска — без подсветки
 
-/** Сдвинуть волны: 0→1, 1→удалить. Новые ID помечаются как wave 0. */
-function updateWaves(newLoads, prevLoadIds) {
-    // Сдвигаем существующие волны
+/** Обновить волны на основе newLoadIds от Core (только реально новые грузы из auto-refresh). */
+function updateWavesFromCore(newLoadIds) {
+    // Сдвигаем существующие волны: 0→1, 1→удалить
     for (const [id, wave] of _waveMap) {
         if (wave >= 1) {
             _waveMap.delete(id);
@@ -45,11 +44,9 @@ function updateWaves(newLoads, prevLoadIds) {
             _waveMap.set(id, wave + 1);
         }
     }
-    // Новые ID (которых не было в предыдущем наборе) → wave 0
-    for (const load of newLoads) {
-        if (!prevLoadIds.has(load.id)) {
-            _waveMap.set(load.id, 0);
-        }
+    // Новые ID от Core → wave 0
+    for (const id of newLoadIds) {
+        _waveMap.set(id, 0);
     }
 }
 
@@ -203,11 +200,9 @@ function onDataUpdated(message) {
     const p = message.payload;
     let updated = [];
     if (p.loads !== undefined) {
-        if (_skipNextWave) {
-            _skipNextWave = false;
-        } else {
-            const prevIds = new Set(state.loads.map(l => l.id));
-            updateWaves(p.loads, prevIds);
+        // Каскад свежести: только по newLoadIds от Core (реально новые из auto-refresh)
+        if (Array.isArray(p.newLoadIds) && p.newLoadIds.length > 0) {
+            updateWavesFromCore(p.newLoadIds);
         }
         state.loads = p.loads;
         updated.push('loads');
@@ -878,7 +873,6 @@ async function doSearch() {
     showTableLoading(true);
     _hasMoreLoads = true; // сброс пагинации
     _waveMap.clear();     // сброс каскада свежести
-    _skipNextWave = true; // первый DATA_UPDATED после поиска — без подсветки
 
     try {
         console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
