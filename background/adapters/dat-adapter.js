@@ -1,13 +1,17 @@
 /**
- * AIDA v0.1 — DAT Adapter
- * Адаптер для DAT One (one.dat.com).
- * Делает GraphQL запрос к freight.api.dat.com напрямую из background.js
- * с ручными Origin/Referer заголовками (проверено в рабочем коде).
+ * AIDA v0.1 — DAT Adapter (Autonomous Plugin)
+ *
+ * Полностью автономный адаптер — чёрный ящик.
+ * Сам берёт токен через AuthManager, сам управляет SSE realtime.
+ * Core не знает деталей — только вызывает единый контракт:
+ *   search(params), startRealtime(params, onUpdate), stopRealtime(),
+ *   getStatus(), login(), disconnect()
  *
  * Rate limit: 1 запрос / 2 секунды.
  */
 
 import Storage from '../storage.js';
+import AuthManager from '../auth/auth-manager.js';
 
 // ============================================================
 // Equipment codes — из example/content/dat-interceptor.js
@@ -90,7 +94,7 @@ async function rateLimit() {
  * @returns {Promise<Load[]>} Нормализованные карточки грузов
  */
 async function search(params) {
-    const token = await Storage.getToken('dat');
+    const token = await AuthManager.getToken('dat');
     if (!token) {
         console.warn('[AIDA/DAT] No token available');
         return {
@@ -194,6 +198,9 @@ async function search(params) {
     const searchId = root?.searchId || null;
     if (searchId) {
         console.log('[AIDA/DAT] searchId for SSE:', searchId);
+        // Сохраняем для startRealtime() — адаптер сам подпишется на SSE
+        DatAdapter._lastSearchId = searchId;
+        DatAdapter._lastSearchToken = token;
     }
 
     const results = rawList.filter(r => r && typeof r === 'object').map(r => normalize(r)).filter(Boolean);
@@ -201,7 +208,7 @@ async function search(params) {
         console.warn('[AIDA/DAT] No items normalized, sample raw:', JSON.stringify(rawList[0]).slice(0, 300));
     }
 
-    return { loads: results, searchId, token };
+    return { ok: true, loads: results, searchId, token, meta: { board: 'dat' } };
 }
 
 // ============================================================
@@ -815,7 +822,120 @@ function unsubscribeLiveQuery() {
 
 const DatAdapter = {
     search, addToWorklist, updateWorklistStatus, removeFromWorklist,
-    getDatPostingId, subscribeLiveQuery, unsubscribeLiveQuery
+    getDatPostingId, subscribeLiveQuery, unsubscribeLiveQuery,
+
+    // ============================================================
+    // Realtime (SSE) — полностью внутри адаптера
+    // ============================================================
+
+    _realtimeParams: null,
+    _onUpdate: null,
+    _liveQuerySub: null,
+    _liveQueryNewCount: 0,
+    _liveQueryRefreshTimer: null,
+    _liveQueryPushTimer: null,
+    _lastSearchId: null,
+    _lastSearchToken: null,
+
+    LIVE_QUERY_REFRESH_DELAY: 30_000,
+    LIVE_QUERY_PUSH_DELAY: 3_000,
+
+    /**
+     * Запустить SSE realtime подписку на новые грузы.
+     * @param {object} params — параметры поиска (searchId и token из последнего search)
+     * @param {function} onUpdate — callback({ newLoadsCount }) при SSE событиях
+     */
+    startRealtime(params, onUpdate) {
+        this.stopRealtime();
+        if (!this._lastSearchId || !this._lastSearchToken) return;
+
+        this._realtimeParams = params;
+        this._onUpdate = onUpdate;
+        this._liveQueryNewCount = 0;
+
+        // Keep-alive alarm для SSE
+        chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
+
+        console.log('[AIDA/DAT] Step: starting SSE liveQuery for searchId:', this._lastSearchId);
+
+        const self = this;
+        this._liveQuerySub = subscribeLiveQuery(this._lastSearchId, this._lastSearchToken, (eventType, data) => {
+            if (eventType.includes('CREATED')) {
+                self._liveQueryNewCount++;
+                if (!self._liveQueryPushTimer) {
+                    self._liveQueryPushTimer = setTimeout(() => {
+                        self._liveQueryPushTimer = null;
+                        if (self._onUpdate) {
+                            self._onUpdate({ type: 'newCount', newLoadsCount: self._liveQueryNewCount });
+                        }
+                    }, self.LIVE_QUERY_PUSH_DELAY);
+                }
+                self._scheduleLiveRefresh();
+            } else if (eventType.includes('DELETED') || eventType.includes('UPDATED')) {
+                self._scheduleLiveRefresh();
+            } else if (eventType === 'SEARCH_MAX') {
+                console.log('[AIDA/DAT] SSE: SEARCH_MAX — search limit reached');
+            }
+        });
+    },
+
+    stopRealtime() {
+        if (this._liveQuerySub) {
+            this._liveQuerySub.stop();
+            this._liveQuerySub = null;
+        }
+        if (this._liveQueryRefreshTimer) {
+            clearTimeout(this._liveQueryRefreshTimer);
+            this._liveQueryRefreshTimer = null;
+        }
+        if (this._liveQueryPushTimer) {
+            clearTimeout(this._liveQueryPushTimer);
+            this._liveQueryPushTimer = null;
+        }
+        this._liveQueryNewCount = 0;
+        this._realtimeParams = null;
+        this._onUpdate = null;
+        chrome.alarms.clear('aida-keepalive').catch(() => { });
+    },
+
+    _scheduleLiveRefresh() {
+        const self = this;
+        if (this._liveQueryRefreshTimer) clearTimeout(this._liveQueryRefreshTimer);
+        this._liveQueryRefreshTimer = setTimeout(async () => {
+            self._liveQueryRefreshTimer = null;
+            if (!self._realtimeParams || self._liveQueryNewCount === 0) return;
+            console.log('[AIDA/DAT] SSE: auto-refreshing after', self._liveQueryNewCount, 'new events');
+            self._liveQueryNewCount = 0;
+            if (self._liveQueryPushTimer) { clearTimeout(self._liveQueryPushTimer); self._liveQueryPushTimer = null; }
+            // Сообщаем Core что нужно обновить (сброс счётчика + полный refresh)
+            if (self._onUpdate) {
+                self._onUpdate({ type: 'refresh', params: self._realtimeParams });
+            }
+        }, this.LIVE_QUERY_REFRESH_DELAY);
+    },
+
+    // ============================================================
+    // Status / Login / Disconnect — прокси к AuthManager
+    // ============================================================
+
+    async getStatus() {
+        const status = await AuthManager.getStatus('dat');
+        return {
+            connected: status === 'connected',
+            status,
+            hasToken: status !== 'disconnected',
+            hasAuthModule: true
+        };
+    },
+
+    async login() {
+        return AuthManager.login('dat');
+    },
+
+    async disconnect() {
+        this.stopRealtime();
+        return AuthManager.disconnect('dat');
+    }
 };
 export default DatAdapter;
 export { normalizeDatResults };

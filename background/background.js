@@ -332,7 +332,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     sendResponse({ error: 'No previous search to refresh' });
                     return;
                 }
-                _liveQueryNewCount = 0;
                 pushToUI({ newLoadsCount: 0 });
                 try {
                     const result = await searchLoads(lastSearch);
@@ -422,11 +421,7 @@ async function handleDatSearchResponse(rawResults, searchId, token) {
     const merged = mergeLoadsByBoard(existing, loads, 'dat');
     await Storage.setLoads(merged);
     await pushToUI({ loads: await Storage.getLoads() });
-    const sseToken = token || await Storage.getToken('dat');
-    if (searchId && sseToken) {
-        const lastSearch = (await Storage.getSettings())?.lastSearch;
-        startLiveQuery(searchId, sseToken, lastSearch);
-    }
+    // SSE теперь управляется адаптером (DatAdapter.startRealtime)
 }
 
 // handleTruckstopSearchResponse — отключён (адаптер автономен, built-in GraphQL)
@@ -566,8 +561,6 @@ async function searchLoads(params) {
         }
     }
     let datLoads = datRaw?.loads || (Array.isArray(datRaw) ? datRaw : []);
-    const datSearchId = datRaw?.searchId || null;
-    const datSseToken = datRaw?.token || null;
 
     const tsRaw = tsResult.status === 'fulfilled' ? tsResult.value : {};
     if (tsResult.status === 'rejected') {
@@ -648,9 +641,11 @@ async function searchLoads(params) {
 
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });
 
-    // SSE-подписка на новые грузы по searchId
-    if (datSearchId && datSseToken) {
-        startLiveQuery(datSearchId, datSseToken, params);
+    // DAT SSE realtime: адаптер сам запускает SSE (использует searchId/token из последнего search)
+    if (!skipDat) {
+        DatAdapter.startRealtime(params, (event) => handleDatRealtimeUpdate(event, params));
+    } else {
+        DatAdapter.stopRealtime();
     }
 
     // Truckstop auto-refresh: адаптер сам управляет alarm
@@ -695,81 +690,25 @@ async function loadMoreLoads() {
 }
 
 // ============================================================
-// SSE Live Query — подписка на новые грузы
+// DAT Realtime Update callback (SSE)
 // ============================================================
 
-let _liveQuerySub = null;
-let _liveQueryNewCount = 0;
-let _liveQueryRefreshTimer = null;
-let _liveQueryPushTimer = null;
-let _liveQueryParams = null;
-const LIVE_QUERY_REFRESH_DELAY = 30_000;
-const LIVE_QUERY_PUSH_DELAY = 3_000; // 3 сек — копим пачку перед отправкой в UI
-
-function startLiveQuery(searchId, token, searchParams) {
-    stopLiveQuery();
-    // Активируем keep-alive только при активном SSE
-    chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
-    _liveQueryNewCount = 0;
-    _liveQueryParams = searchParams;
-
-    console.log('[AIDA/Core] Step: starting SSE liveQuery for searchId:', searchId);
-
-    _liveQuerySub = DatAdapter.subscribeLiveQuery(searchId, token, (eventType, data) => {
-        // SSE event — не логируем каждый (спамит)
-
-        if (eventType.includes('CREATED')) {
-            _liveQueryNewCount++;
-            // Копим пачку событий 3 сек, потом пушим итого
-            if (!_liveQueryPushTimer) {
-                _liveQueryPushTimer = setTimeout(() => {
-                    _liveQueryPushTimer = null;
-                    pushToUI({ newLoadsCount: _liveQueryNewCount });
-                }, LIVE_QUERY_PUSH_DELAY);
-            }
-            scheduleLiveRefresh();
-        } else if (eventType.includes('DELETED') || eventType.includes('UPDATED')) {
-            scheduleLiveRefresh();
-        } else if (eventType === 'SEARCH_MAX') {
-            console.log('[AIDA/Core] SSE: SEARCH_MAX — search limit reached');
-        }
-    });
-}
-
-function scheduleLiveRefresh() {
-    if (_liveQueryRefreshTimer) clearTimeout(_liveQueryRefreshTimer);
-    _liveQueryRefreshTimer = setTimeout(async () => {
-        _liveQueryRefreshTimer = null;
-        if (!_liveQueryParams || _liveQueryNewCount === 0) return;
-        console.log('[AIDA/Core] SSE: auto-refreshing after', _liveQueryNewCount, 'new events');
-        _liveQueryNewCount = 0;
-        if (_liveQueryPushTimer) { clearTimeout(_liveQueryPushTimer); _liveQueryPushTimer = null; }
-        pushToUI({ newLoadsCount: 0 });
+/**
+ * Callback для DatAdapter.startRealtime() — обрабатывает события SSE.
+ * @param {{ type: 'newCount'|'refresh', newLoadsCount?, params? }} event
+ * @param {object} searchParams — параметры последнего поиска
+ */
+async function handleDatRealtimeUpdate(event, searchParams) {
+    if (event.type === 'newCount') {
+        await pushToUI({ newLoadsCount: event.newLoadsCount });
+    } else if (event.type === 'refresh') {
+        await pushToUI({ newLoadsCount: 0 });
         try {
-            await searchLoads(_liveQueryParams);
+            await searchLoads(event.params || searchParams);
         } catch (e) {
-            console.warn('[AIDA/Core] SSE auto-refresh failed:', e.message);
+            console.warn('[AIDA/Core] DAT SSE auto-refresh failed:', e.message);
         }
-    }, LIVE_QUERY_REFRESH_DELAY);
-}
-
-function stopLiveQuery() {
-    if (_liveQuerySub) {
-        _liveQuerySub.stop();
-        _liveQuerySub = null;
     }
-    if (_liveQueryRefreshTimer) {
-        clearTimeout(_liveQueryRefreshTimer);
-        _liveQueryRefreshTimer = null;
-    }
-    if (_liveQueryPushTimer) {
-        clearTimeout(_liveQueryPushTimer);
-        _liveQueryPushTimer = null;
-    }
-    _liveQueryNewCount = 0;
-    _liveQueryParams = null;
-    // Отключаем keep-alive когда SSE не активен
-    chrome.alarms.clear('aida-keepalive').catch(() => { });
 }
 
 // ============================================================
