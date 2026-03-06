@@ -191,6 +191,10 @@ const AuthDat = {
         // Это надёжнее чем прямой Auth0 URL — Chrome пропускает быстрые fragment-redirects.
         const url = 'https://one.dat.com/search-loads';
 
+        // Сохраняем текущий (возможно протухший) токен для сравнения
+        const oldStored = await chrome.storage.local.get('token:dat');
+        const oldToken = oldStored['token:dat'] || null;
+
         return new Promise((resolve) => {
             chrome.tabs.create({ url, active: false }, (tab) => {
                 if (!tab) {
@@ -261,22 +265,24 @@ const AuthDat = {
 
                     // 3. one.dat.com загрузилась (callback мог проскочить)
                     if (changeInfo.status === 'complete' && updatedTab?.url?.includes('one.dat.com')) {
-                        // Страница загрузилась — токен мог быть пойман харвестером
-                        // Ждём 2 сек и проверяем storage
+                        // Ждём 3 сек чтобы harvester успел перехватить и записать токен
                         setTimeout(async () => {
                             if (resolved) return;
                             if (tokenCaptured) {
                                 finish(true, tokenCaptured);
                                 return;
                             }
-                            // Проверяем storage — харвестер мог записать токен
+                            // Проверяем storage — но только если токен ИЗМЕНИЛСЯ
                             const stored = await chrome.storage.local.get('token:dat');
                             const storedToken = stored['token:dat'];
-                            if (storedToken) {
-                                console.log('[AIDA/Auth/DAT] Silent refresh: token from storage after page load');
+                            if (storedToken && storedToken !== oldToken) {
+                                console.log('[AIDA/Auth/DAT] Silent refresh: NEW token from storage after page load');
                                 finish(true, storedToken);
+                            } else {
+                                console.warn('[AIDA/Auth/DAT] Silent refresh: token unchanged after page load');
+                                finish(false, null, 'token_unchanged');
                             }
-                        }, 2000);
+                        }, 3000);
                     }
                 };
 

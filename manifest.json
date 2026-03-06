@@ -46,9 +46,20 @@
         "harvesters/harvester-bridge.js"
       ],
       "matches": [
+        "https://one.dat.com/*",
         "https://loadboard.truckerpath.com/*"
       ],
       "run_at": "document_start"
+    },
+    {
+      "js": [
+        "harvesters/harvester-dat.js"
+      ],
+      "matches": [
+        "https://one.dat.com/*"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "js": [

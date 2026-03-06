@@ -183,7 +183,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { type } = message;
 
     switch (type) {
-        // ----- Harvesters (TP) — все обрабатываются адаптером -----
+        // ----- Harvesters -----
+
+        case 'TOKEN_HARVESTED':
+            // Auth module (auth-dat.js) слушает через свой onMessage listener.
+            sendResponse({ ok: true });
+            break;
 
         case 'TP_SEARCH_RESPONSE':
             TruckerpathAdapter.handleSearchResponse(message.results, message.sourceUrl)
