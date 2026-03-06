@@ -1524,11 +1524,27 @@ async function refreshLoads() {
 }
 
 function updateStatusBar() {
-    const countEl = document.getElementById('status-count');
-    const active = state.loads.filter(l => l.status === 'active').length;
-    const total = state.loads.length;
+    // Счётчики по бордам
+    const boards = { dat: 0, truckstop: 0, tp: 0 };
+    let total = 0;
+    for (const l of state.loads) {
+        total++;
+        if (l.board === 'dat') boards.dat++;
+        else if (l.board === 'truckstop') boards.truckstop++;
+        else if (l.board === 'tp' || l.board === 'truckerpath') boards.tp++;
+    }
 
-    if (countEl) countEl.querySelector('span').textContent = `${active} loads${total !== active ? ` (${total} total)` : ''}`;
+    // Обновить счётчики в board-toggle кнопках
+    const datBtn = document.getElementById('board-btn-dat');
+    const tsBtn = document.getElementById('board-btn-truckstop');
+    const tpBtn = document.getElementById('board-btn-tp');
+    if (datBtn) datBtn.querySelector('.board-label').textContent = `DAT ${boards.dat || ''}`;
+    if (tsBtn) tsBtn.querySelector('.board-label').textContent = `Truckstop ${boards.truckstop || ''}`;
+    if (tpBtn) tpBtn.querySelector('.board-label').textContent = `TruckerPath ${boards.tp || ''}`;
+
+    // Общий счётчик
+    const countEl = document.getElementById('status-count');
+    if (countEl) countEl.querySelector('span').textContent = `${total} loads`;
 
     state.lastRefreshTime = Date.now();
     updateRefreshTimer();
