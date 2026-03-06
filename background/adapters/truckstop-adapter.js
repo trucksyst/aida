@@ -477,7 +477,7 @@ const TruckstopAdapter = {
             enable_floating_loads: true,
             show_empty_minimum_authority_days_required: null,
             carrier_factoring_company_id: null,
-            offset_num: 0,
+            offset_num: Number(params.offset) || 0,
             limit_num: 100
         };
         // pickup_date_end fallback: +45 дней от pickup_date_begin

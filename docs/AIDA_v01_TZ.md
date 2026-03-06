@@ -341,6 +341,7 @@ background/auth/
 | SAVE_SETTINGS    | `data`                 | `{ ok }` |
 | CLEAR_ACTIVE     | —                      | `{ ok }` |
 | TOGGLE_AGENT     | `enabled`              | `{ ok }` |
+| LOAD_MORE        | `{ board? }`           | Core загружает следующую пачку грузов (offset += limit), мержит и шлёт push |
 
 Вся информация, которая нужна UI (включая статус бордов — есть ли токен, тема оформления), должна приходить в ответах на эти запросы или в push-сообщениях от Core. Отдельного доступа к Storage у UI нет.
 

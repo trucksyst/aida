@@ -40,6 +40,10 @@ console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14
 const SEARCH_COOLDOWN_MS = 10_000;
 let _searchCooldownUntil = 0;
 
+/** Truckstop pagination: текущий offset для infinite scroll */
+let _tsOffset = 0;
+const TS_PAGE_SIZE = 100;
+
 /** Мерж: заменяем только грузы конкретного борда, остальные сохраняем. */
 function mergeLoadsByBoard(existing, newLoads, board) {
     const other = (existing || []).filter(l => l.board !== board);
@@ -223,6 +227,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             return true;
         }
+
+        case 'LOAD_MORE':
+            loadMoreLoads().then(sendResponse).catch(err => {
+                console.error('[AIDA/Core] loadMore error:', err);
+                sendResponse({ error: err.message });
+            });
+            return true;
 
         case 'CLEAR_ACTIVE':
             Storage.clearActive().then(async () => {
@@ -645,6 +656,7 @@ async function searchLoads(params) {
     await Storage.clearActive();
     await Storage.setLoads(loads);
     _searchCooldownUntil = Date.now() + SEARCH_COOLDOWN_MS;
+    _tsOffset = 0; // сброс пагинации при новом поиске
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
 
@@ -664,6 +676,50 @@ async function searchLoads(params) {
 
     // Возвращаем loads и warnings для UI
     return { loads, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
+}
+
+// ============================================================
+// loadMoreLoads — infinite scroll (пагинация Truckstop)
+// ============================================================
+
+async function loadMoreLoads() {
+    const settings = await Storage.getSettings();
+    const lastSearch = settings?.lastSearch;
+    if (!lastSearch) return { ok: false, error: 'No active search' };
+
+    _tsOffset += TS_PAGE_SIZE;
+    console.log(`[AIDA/Core] LOAD_MORE: offset=${_tsOffset}`);
+
+    const tsToken = await AuthManager.getToken('truckstop');
+    const tsClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
+
+    if (!tsToken || !tsClaims) {
+        return { ok: false, error: 'Truckstop not connected' };
+    }
+
+    const paramsWithOffset = { ...lastSearch, offset: _tsOffset };
+    const result = await TruckstopAdapter.search(paramsWithOffset, { token: tsToken, claims: tsClaims });
+
+    if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) {
+        console.log('[AIDA/Core] LOAD_MORE: no more loads');
+        return { ok: true, added: 0, hasMore: false };
+    }
+
+    // Мерж: добавляем новые грузы к существующим (в конец)
+    const existing = await Storage.getLoads();
+    const existingIds = new Set(existing.map(l => l.id));
+    const newLoads = result.loads.filter(l => !existingIds.has(l.id));
+
+    if (newLoads.length === 0) {
+        return { ok: true, added: 0, hasMore: false };
+    }
+
+    const merged = [...existing, ...newLoads]; // новые в конец
+    await Storage.setLoads(merged);
+    await pushToUI({ loads: merged });
+
+    console.log(`[AIDA/Core] LOAD_MORE: +${newLoads.length} loads (total: ${merged.length})`);
+    return { ok: true, added: newLoads.length, hasMore: result.loads.length >= TS_PAGE_SIZE };
 }
 
 // ============================================================

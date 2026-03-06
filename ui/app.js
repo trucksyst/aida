@@ -716,6 +716,44 @@ function bindEvents() {
             }
         });
     });
+
+    // Infinite scroll: подгрузка следующей пачки грузов при прокрутке
+    const tableWrap = document.getElementById('load-table-wrap');
+    tableWrap.addEventListener('scroll', () => {
+        if (_loadingMore || !_hasMoreLoads) return;
+        const { scrollTop, scrollHeight, clientHeight } = tableWrap;
+        if (scrollTop + clientHeight >= scrollHeight - 200) {
+            loadMore();
+        }
+    });
+}
+
+// Infinite scroll state
+let _loadingMore = false;
+let _hasMoreLoads = true;
+
+async function loadMore() {
+    if (_loadingMore || !_hasMoreLoads) return;
+    _loadingMore = true;
+
+    const spinner = document.getElementById('load-more-spinner');
+    if (spinner) spinner.style.display = 'flex';
+
+    try {
+        const resp = await sendToCore('LOAD_MORE');
+        if (resp?.added > 0) {
+            showToast(`+${resp.added} loads`);
+        }
+        if (resp?.hasMore === false) {
+            _hasMoreLoads = false;
+            console.log('[AIDA/UI] No more loads to fetch');
+        }
+    } catch (e) {
+        console.warn('[AIDA/UI] loadMore error:', e);
+    } finally {
+        _loadingMore = false;
+        if (spinner) spinner.style.display = 'none';
+    }
 }
 
 // ============================================================
@@ -805,6 +843,7 @@ async function doSearch() {
 
     showTableEmpty(false);
     showTableLoading(true);
+    _hasMoreLoads = true; // сброс пагинации
 
     try {
         console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
