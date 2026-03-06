@@ -25,6 +25,7 @@
     "https://freight.api.dat.com/*",
     "https://freight.api.prod.dat.com/*",
     "https://identity.api.dat.com/*",
+    "https://login.dat.com/*",
     "https://www.truckstop.com/*",
     "https://main.truckstop.com/*",
     "https://auth.truckstop.com/*",
@@ -46,20 +47,9 @@
         "harvesters/harvester-bridge.js"
       ],
       "matches": [
-        "https://one.dat.com/*",
         "https://loadboard.truckerpath.com/*"
       ],
       "run_at": "document_start"
-    },
-    {
-      "js": [
-        "harvesters/harvester-dat.js"
-      ],
-      "matches": [
-        "https://one.dat.com/*"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
     },
     {
       "js": [
