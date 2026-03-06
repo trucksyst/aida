@@ -24,7 +24,7 @@ import Storage from './storage.js';
 import Retell from './retell.js';
 import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
-import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truckerpath-adapter.js';
+import TruckerpathAdapter from './adapters/truckerpath-adapter.js';
 import AuthManager from './auth/auth-manager.js';
 
 // ============================================================
@@ -61,12 +61,6 @@ console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14
 const SEARCH_COOLDOWN_MS = 10_000;
 let _searchCooldownUntil = 0;
 
-/** Мерж: заменяем только грузы конкретного борда, остальные сохраняем. */
-function mergeLoadsByBoard(existing, newLoads, board) {
-    const other = (existing || []).filter(l => l.board !== board);
-    return [...(other || []), ...((newLoads || []))];
-}
-
 /** Проверить, открыта ли вкладка борда. */
 async function isBoardTabOpen(board) {
     const patterns = {
@@ -89,32 +83,25 @@ async function getSettingsForUI() {
     const settings = await Storage.getSettings();
     const disabledBoards = settings.disabledBoards || {};
 
-    // Генерируем boardStatus через Adapter Registry
+    // Генерируем boardStatus через Adapter Registry — каждый адаптер знает свой статус
     const boardStatus = {};
     const statusPromises = Object.entries(ADAPTERS).map(async ([board, cfg]) => {
-        let status = 'disconnected';
-        let hasToken = false;
-        let tabOpen = false;
+        const adapter = cfg.module;
+        let statusInfo = { connected: false, status: 'disconnected', hasToken: false, hasAuthModule: cfg.hasAuthModule };
 
-        if (cfg.hasAuthModule) {
-            // Адаптеры с auth-модулем — спрашиваем AuthManager
-            status = await AuthManager.getStatus(board);
-            hasToken = status !== 'disconnected';
-        } else {
-            // TP и другие без auth-модуля — по наличию template
-            const templateKey = `${board === 'tp' ? 'truckerpath' : board}RequestTemplate`;
-            hasToken = !!settings[templateKey];
-            status = hasToken ? 'connected' : 'disconnected';
+        if (adapter.getStatus) {
+            // Адаптер сам знает свой статус (DAT/TS через AuthManager, TP через template)
+            statusInfo = await adapter.getStatus();
+        } else if (cfg.hasAuthModule) {
+            const s = await AuthManager.getStatus(board);
+            statusInfo = { connected: s === 'connected', status: s, hasToken: s !== 'disconnected', hasAuthModule: true };
         }
 
-        tabOpen = await isBoardTabOpen(board);
+        const tabOpen = await isBoardTabOpen(board);
 
         boardStatus[board] = {
-            connected: status === 'connected',
-            status,
-            hasToken,
+            ...statusInfo,
             tabOpen,
-            hasAuthModule: cfg.hasAuthModule,
             disabled: !!disabledBoards[board]
         };
     });
@@ -189,16 +176,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { type } = message;
 
     switch (type) {
-        // ----- Harvesters (only TP legacy) -----
-        // DAT/TS харвестеры отключены — адаптеры полностью автономны.
+        // ----- Harvesters (TP) — все обрабатываются адаптером -----
 
         case 'TP_SEARCH_RESPONSE':
-            handleTruckerpathSearchResponse(message.results, message.sourceUrl).catch(console.error);
+            TruckerpathAdapter.handleSearchResponse(message.results, message.sourceUrl)
+                .then(async (merged) => {
+                    if (merged) await pushToUI({ loads: merged, settings: await getSettingsForUI() });
+                })
+                .catch(console.error);
             sendResponse({ ok: true });
             break;
 
         case 'TP_SEARCH_REQUEST_CAPTURED':
-            handleTruckerpathRequestCaptured(message).catch(console.error);
+            TruckerpathAdapter.handleRequestCaptured(message).catch(console.error);
             sendResponse({ ok: true });
             break;
 
@@ -372,53 +362,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// handleTokenHarvested / handleDatSearchResponse / handleTruckstopRequestCaptured
-// Удалены — адаптеры DAT/TS полностью автономны. TP harvester остаётся (deferred).
-
-async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
-    if (!Array.isArray(rawResults) || rawResults.length === 0) return;
-    console.log(`[AIDA/Core] TP INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} loads`);
-    if (Date.now() < _searchCooldownUntil) {
-
-        return;
-    }
-    let loads;
-    try {
-        loads = normalizeTruckerpathResults(rawResults, {});
-    } catch (e) {
-        console.warn('[AIDA/Core] handleTruckerpathSearchResponse normalize error:', e?.message);
-        return;
-    }
-    if (!loads || loads.length === 0) return;
-    console.log(`[AIDA/Core] TP normalized: ${loads.length} loads`);
-    const existing = await Storage.getLoads();
-    const merged = mergeLoadsByBoard(existing, loads, 'tp');
-    await Storage.setLoads(merged);
-    await pushToUI({ loads: await Storage.getLoads(), settings: await getSettingsForUI() });
-}
-
-// handleTruckstopRequestCaptured — удалён (адаптер автономен, GraphQL built-in)
-
-async function handleTruckerpathRequestCaptured(msg) {
-    if (!msg || !msg.url) return;
-    const template = {
-        url: msg.url,
-        method: msg.method || 'GET',
-        headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : {},
-        body: typeof msg.body === 'string' ? msg.body : (msg.body ? JSON.stringify(msg.body) : null),
-        capturedAt: new Date().toISOString()
-    };
-    let cookies = [];
-    try {
-        const a = await chrome.cookies.getAll({ domain: 'loadboard.truckerpath.com' });
-        const b = await chrome.cookies.getAll({ domain: 'truckerpath.com' });
-        cookies = [...a, ...b];
-    } catch (_) { }
-    template.cookies = cookies;
-    await Storage.saveSettings({ truckerpathRequestTemplate: template });
-}
-
-// fetchDatProfile — перенесён в DatAdapter.fetchProfile()
+// Все harvester handlerы удалены — адаптеры полностью автономны.
+// TP_SEARCH_RESPONSE / TP_SEARCH_REQUEST_CAPTURED → TruckerpathAdapter (router выше).
 
 // ============================================================
 // searchLoads — тонкий оркестратор через Adapter Registry
@@ -434,23 +379,12 @@ async function searchLoads(params) {
     const settings = await Storage.getSettings();
     const disabled = settings.disabledBoards || {};
 
-    // --- 1. Параллельно вызываем .search() для каждого активного борда ---
     const boards = Object.keys(ADAPTERS);
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
-
-    // TP ещё не автономен — нужен контекст (template + cachedLoads)
-    const tpTemplate = settings?.truckerpathRequestTemplate || null;
-    const existing = await Storage.getLoads();
-    const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
 
     const searchPromises = boards.map(board => {
         if (disabled[board]) return Promise.resolve(skipResult);
         const adapter = ADAPTERS[board].module;
-
-        // TP — передаём контекст (deferred autonomy)
-        if (board === 'tp') {
-            return adapter.search(params, { cachedLoads: tpCached, template: tpTemplate });
-        }
         return adapter.search(params);
     });
 
@@ -497,9 +431,7 @@ async function searchLoads(params) {
                 try {
                     const adapter = ADAPTERS[board].module;
                     const displayName = ADAPTERS[board].displayName;
-                    const retryResult = board === 'tp'
-                        ? await adapter.search(params, { cachedLoads: [], template: tpTemplate })
-                        : await adapter.search(params);
+                    const retryResult = await adapter.search(params);
                     boardLoads[board] = retryResult?.loads || [];
                     const idx = adapterWarnings.findIndex(w => w.startsWith(`${displayName}:`));
                     if (idx !== -1) adapterWarnings.splice(idx, 1);

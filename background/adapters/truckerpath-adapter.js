@@ -1,10 +1,12 @@
 /**
- * AIDA v0.1 — TruckerPath Adapter
- * Работает только через данные, перехваченные harvester-ом на вкладке TruckerPath.
- * Запросов к API TruckerPath из background не делаем: сервер отдаёт HTML (логин/редирект), не JSON.
+ * AIDA v0.1 — TruckerPath Adapter (автономный)
+ * Делает запросы к TP API сам — template и cookies берёт из Storage.
+ * Template сохраняется harvester-ом на вкладке TruckerPath (one-time capture).
  *
- * Поля сырой карточки: в консоли лог "[AIDA/Core] TruckerPath raw load card" — развернуть объект и подставить ключи (RAW_FIELD_*).
+ * Контракт: search(), getStatus(), handleSearchResponse(), handleRequestCaptured()
  */
+import Storage from '../storage.js';
+
 const BOARD = 'tp';
 
 /** Ключ описания груза (COMMENTS) в сырой карточке — взять из консоли, не угадывать. */
@@ -287,9 +289,13 @@ function normalizeTruckerpathResults(raw, params) {
 }
 
 const TruckerpathAdapter = {
-    async search(params, ctx = {}) {
-        const cachedLoads = Array.isArray(ctx.cachedLoads) ? ctx.cachedLoads : [];
-        const template = ctx.template || null;
+    async search(params) {
+        // Адаптер сам берёт template и cachedLoads из Storage
+        const settings = await Storage.getSettings();
+        const template = settings?.truckerpathRequestTemplate || null;
+        const existing = await Storage.getLoads();
+        const cachedLoads = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
+
         console.log('[AIDA/TruckerPath] search() called', {
             hasTemplate: !!(template && template.url),
             cachedLoadsCount: cachedLoads.length,
@@ -305,7 +311,6 @@ const TruckerpathAdapter = {
             let fetchUrl = template.url;
             if (fetchUrl.includes('/coyote/search/filter/') || fetchUrl.includes('/chr/search/filter/')) {
                 fetchUrl = fetchUrl.replace('/coyote/search/filter/', '/search/filter/').replace('/chr/search/filter/', '/search/filter/');
-
             }
 
             // Геокодируем origin/destination → координаты для TP API
@@ -314,7 +319,6 @@ const TruckerpathAdapter = {
                 const geo = await geocodeCity(params.origin.city, params.origin.state);
                 if (geo) {
                     enrichedParams._originGeo = geo;
-
                 } else {
                     console.warn('[AIDA/TruckerPath] Failed to geocode origin:', params.origin.city, params.origin.state);
                 }
@@ -323,25 +327,20 @@ const TruckerpathAdapter = {
                 const geo = await geocodeCity(params.destination.city, params.destination.state);
                 if (geo) {
                     enrichedParams._destGeo = geo;
-
                 }
             }
 
             let body = typeof template.body === 'string' ? template.body : JSON.stringify(template.body);
 
-
-            // Прямая замена координат и адреса в body строке (regex, гарантированно работает)
+            // Прямая замена координат и адреса в body строке
             if (enrichedParams._originGeo) {
                 const { lat, lon } = enrichedParams._originGeo;
-                // Заменяем первое вхождение "lat":число и "lng":число
                 body = body.replace(/"lat"\s*:\s*-?[\d.]+/, `"lat":${lat}`);
                 body = body.replace(/"lng"\s*:\s*-?[\d.]+/, `"lng":${lon}`);
-
             }
             if (params.origin?.city) {
                 const addr = `${params.origin.city},${params.origin.state || ''},US`;
                 body = body.replace(/"address"\s*:\s*"[^"]*"/, `"address":"${addr}"`);
-
             }
             if (params.radius != null) {
                 body = body.replace(/"max"\s*:\s*\d+/, `"max":${Number(params.radius) || 200}`);
@@ -355,12 +354,10 @@ const TruckerpathAdapter = {
 
             const headers = { ...(template.headers || {}) };
             if (!headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = 'application/json';
-            // Принудительно ставим Origin/Referer — Chrome из extension ставит chrome-extension://
             delete headers['origin']; delete headers['Origin'];
             delete headers['referer']; delete headers['Referer'];
             headers['Origin'] = 'https://loadboard.truckerpath.com';
             headers['Referer'] = 'https://loadboard.truckerpath.com/';
-            // Удаляем sec-fetch-* — Chrome перезаписывает, но лишние мешают
             for (const k of Object.keys(headers)) {
                 if (k.toLowerCase().startsWith('sec-fetch-') || k === ':authority' || k === ':method' || k === ':path' || k === ':scheme') {
                     delete headers[k];
@@ -371,7 +368,6 @@ const TruckerpathAdapter = {
             }
 
             try {
-
                 const resp = await fetch(fetchUrl, {
                     method: template.method || 'POST',
                     headers,
@@ -381,7 +377,6 @@ const TruckerpathAdapter = {
                 const text = await resp.text();
                 if (!resp.ok) {
                     console.warn('[AIDA/TruckerPath] Step: HTTP', resp.status, text?.slice(0, 200));
-                    // Fallback на кэш при ошибке
                     if (cachedLoads.length > 0) {
                         console.log('[AIDA/TruckerPath] Falling back to cached loads:', cachedLoads.length);
                         return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache-fallback' } };
@@ -404,8 +399,6 @@ const TruckerpathAdapter = {
                 const data = JSON.parse(text);
                 const rawResults = findLoadsInResponse(data);
                 if (!Array.isArray(rawResults) || rawResults.length === 0) {
-                    const topKeys = data ? Object.keys(data).slice(0, 10).join(', ') : 'null';
-
                     return { ok: true, loads: [], meta: { board: BOARD, source: 'api' } };
                 }
                 console.log('[AIDA/TruckerPath] Step: parsed', rawResults.length, 'loads from API');
@@ -413,7 +406,6 @@ const TruckerpathAdapter = {
                 return { ok: true, loads, meta: { board: BOARD, source: 'api' } };
             } catch (e) {
                 console.warn('[AIDA/TruckerPath] Step: fetch error:', e?.message);
-                // Fallback на кэш
                 if (cachedLoads.length > 0) {
                     return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache-fallback' } };
                 }
@@ -424,7 +416,7 @@ const TruckerpathAdapter = {
             }
         }
 
-        // 2) Нет template — если есть кэш, вернём его (грузы от харвестера)
+        // 2) Нет template — если есть кэш, вернём его
         if (cachedLoads.length > 0) {
             console.log('[AIDA/TruckerPath] No template, using cached loads:', cachedLoads.length);
             return { ok: true, loads: cachedLoads, meta: { board: BOARD, source: 'cache' } };
@@ -436,6 +428,79 @@ const TruckerpathAdapter = {
             ok: false, loads: [], meta: { board: BOARD },
             error: { code: 'NO_TEMPLATE', message: 'Open TruckerPath tab and run a search there to capture request template', retriable: false }
         };
+    },
+
+    // ============================================================
+    // Harvester handlers — обработка сообщений от content script
+    // ============================================================
+
+    /** Перехваченные грузы с вкладки TP → мерж с существующими. */
+    async handleSearchResponse(rawResults, sourceUrl) {
+        if (!Array.isArray(rawResults) || rawResults.length === 0) return;
+        console.log(`[AIDA/TP] INTERCEPT from: ${sourceUrl || 'unknown'} — ${rawResults.length} loads`);
+
+        let loads;
+        try {
+            loads = normalizeTruckerpathResults(rawResults, {});
+        } catch (e) {
+            console.warn('[AIDA/TP] handleSearchResponse normalize error:', e?.message);
+            return;
+        }
+        if (!loads || loads.length === 0) return;
+
+        console.log(`[AIDA/TP] normalized: ${loads.length} loads`);
+        const existing = await Storage.getLoads();
+        // Мерж: заменяем только TP-грузы, сохраняя DAT/TS
+        const nonTp = existing.filter(l => l.board !== BOARD);
+        const merged = [...nonTp, ...loads];
+        await Storage.setLoads(merged);
+        return merged;
+    },
+
+    /** Перехваченный запрос TP → сохранить как template для replay. */
+    async handleRequestCaptured(msg) {
+        if (!msg || !msg.url) return;
+        const template = {
+            url: msg.url,
+            method: msg.method || 'GET',
+            headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : {},
+            body: typeof msg.body === 'string' ? msg.body : (msg.body ? JSON.stringify(msg.body) : null),
+            capturedAt: new Date().toISOString()
+        };
+        let cookies = [];
+        try {
+            const a = await chrome.cookies.getAll({ domain: 'loadboard.truckerpath.com' });
+            const b = await chrome.cookies.getAll({ domain: 'truckerpath.com' });
+            cookies = [...a, ...b];
+        } catch (_) { }
+        template.cookies = cookies;
+        await Storage.saveSettings({ truckerpathRequestTemplate: template });
+        console.log('[AIDA/TP] Template captured from:', msg.url);
+    },
+
+    // ============================================================
+    // Status / Login / Disconnect
+    // ============================================================
+
+    async getStatus() {
+        const settings = await Storage.getSettings();
+        const hasTemplate = !!settings?.truckerpathRequestTemplate;
+        return {
+            connected: hasTemplate,
+            status: hasTemplate ? 'connected' : 'disconnected',
+            hasToken: hasTemplate,
+            hasAuthModule: false
+        };
+    },
+
+    async login() {
+        // TP не имеет auth-модуля — нужно открыть вкладку и залогиниться
+        return { ok: false, error: 'Open loadboard.truckerpath.com and login manually' };
+    },
+
+    async disconnect() {
+        await Storage.saveSettings({ truckerpathRequestTemplate: null });
+        return { ok: true };
     }
 };
 
