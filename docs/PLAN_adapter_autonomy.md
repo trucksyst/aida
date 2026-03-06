@@ -579,10 +579,39 @@ aida/
 
 ---
 
+### Фаза 6: Глубокая зачистка background.js
+
+> **Цель:** убрать из Core ВСЮ борд-специфичную логику — ни одного `if (board === 'dat')`.
+> Перенести `fetchDatProfile` в DAT adapter, удалить мёртвые harvester handler'ы.
+
+#### 6.1 fetchDatProfile → в DAT adapter
+- `fetchDatProfile(token)` (~20 строк) — сейчас в background.js, вызывается при `TOKEN_HARVESTED`
+- Перенести в `dat-adapter.js` как `DatAdapter.fetchProfile()`
+- В background.js: `DatAdapter.fetchProfile().catch(console.warn)`
+
+#### 6.2 Удалить мёртвые harvester handler'ы из background.js
+- `handleDatSearchResponse()` — DAT теперь ищет через adapter.search(), intercept не нужен
+- `handleTokenHarvested()` — DAT adapter сам берёт токен, harvester legacy
+- `handleTruckstopRequestCaptured` — уже удалён (комментарий остался)
+- Оставить: `handleTruckerpathSearchResponse()` и `handleTruckerpathRequestCaptured()` (TP пока не автономен)
+
+#### 6.3 Убрать борд-специфичные ветки из message router
+- `TOKEN_HARVESTED` + `DAT_SEARCH_RESPONSE` — удалить из switch/case
+- Оставить: `TP_SEARCH_RESPONSE`, `TP_SEARCH_REQUEST_CAPTURED` (TP ещё не автономен)
+
+#### 6.4 Убрать неиспользуемые импорты
+- `normalizeDatResults` — больше не используется в background.js (intercept удалён)
+- `normalizeTruckstopResults` — уже не используется
+
+---
+
 ## Метрика успеха
 
-- [ ] `background.js` ≤ 350 строк
-- [ ] Добавление нового борда = 1 файл + 1 строка регистрации в ADAPTERS
-- [ ] TOGGLE_BOARD — 5 строк в Core, без борд-специфичной логики
-- [ ] Ни один `if (board === 'dat')` или `if (board === 'truckstop')` в `background.js`
+- [x] Adapter Registry — добавление борда = 1 файл + 1 строка ✅
+- [x] `searchLoads()` — generic loop, без борд-специфичного кода ✅
+- [x] `getSettingsForUI()` — через registry ✅
+- [x] Единый `handleRealtimeUpdate()` для всех бордов ✅
+- [ ] `background.js` ≤ 900 строк (после Фазы 6)
+- [ ] Ноль `if (board === 'dat')` или `if (board === 'truckstop')` в `background.js` (кроме TP legacy)
 - [ ] Все тесты работают: login, search, realtime, loadMore, toggle, disconnect
+

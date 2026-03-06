@@ -22,8 +22,8 @@
 
 import Storage from './storage.js';
 import Retell from './retell.js';
-import DatAdapter, { normalizeDatResults } from './adapters/dat-adapter.js';
-import TruckstopAdapter, { normalizeTruckstopResults } from './adapters/truckstop-adapter.js';
+import DatAdapter from './adapters/dat-adapter.js';
+import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter, { normalizeTruckerpathResults } from './adapters/truckerpath-adapter.js';
 import AuthManager from './auth/auth-manager.js';
 
@@ -189,20 +189,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { type } = message;
 
     switch (type) {
-        // ----- Харвестеры -----
-        case 'TOKEN_HARVESTED':
-            handleTokenHarvested(message).catch(console.error);
-            sendResponse({ ok: true });
-            break;
-
-        case 'DAT_SEARCH_RESPONSE':
-            handleDatSearchResponse(message.results, message.searchId, message.token).catch(console.error);
-            sendResponse({ ok: true });
-            break;
-
-        // Truckstop harvester отключён (§18 ТЗ) — адаптер полностью автономный.
-        // TS_SEARCH_RESPONSE, TS_SEARCH_REQUEST_CAPTURED больше не обрабатываются.
-        // Auth-модуль (auth-truckstop.js) управляет токенами, адаптер делает GraphQL запросы.
+        // ----- Harvesters (only TP legacy) -----
+        // DAT/TS харвестеры отключены — адаптеры полностью автономны.
 
         case 'TP_SEARCH_RESPONSE':
             handleTruckerpathSearchResponse(message.results, message.sourceUrl).catch(console.error);
@@ -384,58 +372,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// ============================================================
-// Token Harvested
-// ============================================================
-
-async function handleTokenHarvested({ board, token }) {
-    if (!token) return;
-
-    // Truckstop harvester отключён (§18 ТЗ) — токены только через auth-truckstop.js
-    if (board === 'truckstop') {
-        console.log('[AIDA/Core] TOKEN_HARVESTED for truckstop ignored — adapter is autonomous');
-        return;
-    }
-
-    const existing = await Storage.getToken(board);
-    if (existing === token) return;
-
-    // Сохраняем токен через AuthManager (с мета-данными expiry)
-    // + в Storage напрямую для обратной совместимости с адаптерами
-    await Storage.setToken(board, token);
-    await AuthManager.handleHarvestedToken(board, token);
-    await pushToUI({ settings: await getSettingsForUI() });
-
-    if (board === 'dat') {
-        fetchDatProfile(token).catch(console.warn);
-    }
-}
-
-async function handleDatSearchResponse(rawResults, searchId, token) {
-    if (!Array.isArray(rawResults) || rawResults.length === 0) {
-        console.warn('[AIDA/Core] handleDatSearchResponse: empty or not array');
-        return;
-    }
-    console.log(`[AIDA/Core] DAT INTERCEPT — ${rawResults.length} loads`);
-    if (Date.now() < _searchCooldownUntil) {
-
-        return;
-    }
-    const loads = normalizeDatResults(rawResults);
-    if (loads.length === 0) {
-        console.warn('[AIDA/Core] handleDatSearchResponse: no loads after normalize');
-        return;
-    }
-    // Мерж: заменяем только DAT-грузы, сохраняя TS/TP
-    const existing = await Storage.getLoads();
-    const merged = mergeLoadsByBoard(existing, loads, 'dat');
-    await Storage.setLoads(merged);
-    await pushToUI({ loads: await Storage.getLoads() });
-    // SSE теперь управляется адаптером (DatAdapter.startRealtime)
-}
-
-// handleTruckstopSearchResponse — отключён (адаптер автономен, built-in GraphQL)
-// async function handleTruckstopSearchResponse(rawResults) { ... }
+// handleTokenHarvested / handleDatSearchResponse / handleTruckstopRequestCaptured
+// Удалены — адаптеры DAT/TS полностью автономны. TP harvester остаётся (deferred).
 
 async function handleTruckerpathSearchResponse(rawResults, sourceUrl) {
     if (!Array.isArray(rawResults) || rawResults.length === 0) return;
@@ -480,31 +418,7 @@ async function handleTruckerpathRequestCaptured(msg) {
     await Storage.saveSettings({ truckerpathRequestTemplate: template });
 }
 
-// ============================================================
-// DAT Profile (автозагрузка при получении токена)
-// ============================================================
-
-async function fetchDatProfile(token) {
-    const resp = await fetch('https://identity.api.dat.com/account/v1/users', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    if (!resp.ok) return;
-
-    const profile = await resp.json();
-    const settings = await Storage.getSettings();
-    await Storage.saveSettings({
-        ...settings,
-        user: {
-            ...settings.user,
-            companyName: profile?.account?.companyName,
-            firstName: profile?.firstName,
-            lastName: profile?.lastName,
-            email: profile?.email
-        }
-    });
-    await pushToUI({ settings: await getSettingsForUI() });
-}
+// fetchDatProfile — перенесён в DatAdapter.fetchProfile()
 
 // ============================================================
 // searchLoads — тонкий оркестратор через Adapter Registry
@@ -707,19 +621,16 @@ async function saveBookmark(loadId) {
     const load = loads.find(l => l.id === loadId);
     if (!load) return { error: 'Load not found' };
 
-    // Синхронизация с бордом DAT (My Loads — SAVED)
-    if (load.board === 'dat') {
+    // Lifecycle hook: адаптер сам решает что делать при bookmark
+    const adapter = ADAPTERS[load.board]?.module;
+    if (adapter?.onBookmark) {
         try {
-            if (load.worklistItemId) {
-                await DatAdapter.updateWorklistStatus(load.worklistItemId, 'SAVED');
-            } else {
-                const result = await DatAdapter.addToWorklist(load, 'SAVED');
-                if (result?.worklistItemId) {
-                    await Storage.setLoadWorklistId(loadId, result.worklistItemId);
-                }
+            const result = await adapter.onBookmark(load);
+            if (result?.worklistItemId) {
+                await Storage.setLoadWorklistId(loadId, result.worklistItemId);
             }
         } catch (e) {
-            console.warn('[AIDA/Core] DAT worklist SAVED sync failed:', e.message);
+            console.warn(`[AIDA/Core] ${load.board} onBookmark failed:`, e.message);
         }
     }
 
@@ -736,13 +647,17 @@ async function saveBookmark(loadId) {
 async function removeBookmark(loadId) {
     const bookmarks = await Storage.getBookmarks();
     const load = bookmarks.find(b => b.id === loadId);
-    if (load?.board === 'dat' && load.worklistItemId) {
+
+    // Lifecycle hook: адаптер сам решает что делать при unbookmark
+    const adapter = load?.board ? ADAPTERS[load.board]?.module : null;
+    if (adapter?.onUnbookmark) {
         try {
-            await DatAdapter.removeFromWorklist(load.worklistItemId);
+            await adapter.onUnbookmark(load);
         } catch (e) {
-            console.warn('[AIDA/Core] DAT worklist remove failed:', e.message);
+            console.warn(`[AIDA/Core] ${load.board} onUnbookmark failed:`, e.message);
         }
     }
+
     await Storage.removeBookmark(loadId);
     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
     console.log('[AIDA/Core] Step: removeBookmark done → pushToUI(loads, bookmarks)');
@@ -768,15 +683,16 @@ async function callBroker(loadId) {
     const dispatcher = settings.user || {};
 
     if (load.broker?.phone) {
-        // Синхронизация с бордом DAT (My Loads — CALLED): только если ещё не в worklist
-        if (load.board === 'dat' && !load.worklistItemId) {
+        // Lifecycle hook: адаптер сам решает что делать при call
+        const adapter = ADAPTERS[load.board]?.module;
+        if (adapter?.onCall) {
             try {
-                const wlResult = await DatAdapter.addToWorklist(load, 'CALLED');
+                const wlResult = await adapter.onCall(load);
                 if (wlResult?.worklistItemId) {
                     await Storage.setLoadWorklistId(loadId, wlResult.worklistItemId);
                 }
             } catch (e) {
-                console.warn('[AIDA/Core] DAT worklist CALLED sync failed:', e.message);
+                console.warn(`[AIDA/Core] ${load.board} onCall failed:`, e.message);
             }
         }
 

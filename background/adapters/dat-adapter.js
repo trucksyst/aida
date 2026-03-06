@@ -935,6 +935,64 @@ const DatAdapter = {
     async disconnect() {
         this.stopRealtime();
         return AuthManager.disconnect('dat');
+    },
+
+    // ============================================================
+    // Profile — автозагрузка профиля DAT при получении токена
+    // ============================================================
+
+    async fetchProfile() {
+        const token = await AuthManager.getToken('dat');
+        if (!token) return;
+
+        const resp = await fetch('https://identity.api.dat.com/account/v1/users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!resp.ok) return;
+
+        const profile = await resp.json();
+        const settings = await Storage.getSettings();
+        await Storage.saveSettings({
+            ...settings,
+            user: {
+                ...settings.user,
+                companyName: profile?.account?.companyName,
+                firstName: profile?.firstName,
+                lastName: profile?.lastName,
+                email: profile?.email
+            }
+        });
+        console.log('[AIDA/DAT] Profile fetched:', profile?.firstName, profile?.lastName);
+    },
+
+    // ============================================================
+    // Lifecycle hooks — вызываются Core при действиях с грузами
+    // ============================================================
+
+    /** При сохранении в закладки → добавить/обновить в My Loads (SAVED). */
+    async onBookmark(load) {
+        if (load.worklistItemId) {
+            await updateWorklistStatus(load.worklistItemId, 'SAVED');
+        } else {
+            const result = await addToWorklist(load, 'SAVED');
+            return result; // { worklistItemId }
+        }
+    },
+
+    /** При удалении из закладок → удалить из My Loads. */
+    async onUnbookmark(load) {
+        if (load.worklistItemId) {
+            await removeFromWorklist(load.worklistItemId);
+        }
+    },
+
+    /** При звонке брокеру → добавить в My Loads (CALLED). */
+    async onCall(load) {
+        if (!load.worklistItemId) {
+            const result = await addToWorklist(load, 'CALLED');
+            return result; // { worklistItemId }
+        }
     }
 };
 export default DatAdapter;
