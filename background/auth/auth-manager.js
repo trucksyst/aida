@@ -11,8 +11,8 @@
  *   authManager.getAllStatuses()    → { dat: {...}, truckstop: {...}, tp: {...} }
  *   authManager.disconnect(board)  → удалить токен
  *
- * Совместимость: пишет токены в те же ключи Storage (token:dat, token:truckstop),
- * что и текущие харвестеры. Адаптеры продолжают работать без изменений.
+ * Совместимость: пишет токены в те же ключи Storage (token:dat, token:truckstop).
+ * Адаптеры продолжают работать без изменений.
  */
 
 import AuthDat from './auth-dat.js';
@@ -42,7 +42,6 @@ const AuthManager = {
         const module = AUTH_MODULES[board];
         if (!module) {
             // Борды без auth-модуля — открываем сайт борда в popup.
-            // Юзер залогинится → харвестер поймает токен/шаблон.
             const url = this._boardUrls[board];
             if (url) {
                 console.log(`[AIDA/Auth] Opening fallback login popup for ${board}: ${url}`);
@@ -143,9 +142,7 @@ const AuthManager = {
     },
 
     /**
-     * Обработка токена от харвестера.
-     * Харвестер как и раньше отправляет TOKEN_HARVESTED — совместимость сохранена.
-     * Но теперь мы также обновляем мета-данные auth-модуля.
+     * Обработка токена от харвестера (для бордов с content scripts).
      */
     async handleHarvestedToken(board, token) {
         if (!token) return;
@@ -161,7 +158,6 @@ const AuthManager = {
 
     /**
      * URL-ы бордов для fallback popup (борды без auth-модуля).
-     * Юзер залогинится на сайте → харвестер поймает токен/шаблон → popup закроется.
      */
     _boardUrls: {
         dat: 'https://one.dat.com/search-loads',
@@ -198,7 +194,7 @@ const AuthManager = {
 
             const module = AUTH_MODULES[board];
 
-            // Борды без auth-модуля (Truckstop, TP) — НЕ открываем popup автоматически.
+            // Борды без auth-модуля — НЕ открываем popup автоматически.
             // Popup для них только при ручном клике юзера на кнопку.
             if (!module) {
 

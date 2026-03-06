@@ -91,8 +91,6 @@ async function init() {
     // Очищаем старые грузы при открытии — каждый раз чистый старт
     await sendToCore('CLEAR_LOADS');
     state.loads = [];
-
-
     // Даты по умолчанию — сегодня (LOCAL, не UTC)
     document.getElementById('date-from').value = localDateStr();
     document.getElementById('date-to').value = localDateStr();
@@ -114,8 +112,6 @@ async function init() {
 
     // Единственная подписка на обновления — push от Core (контракт API)
     chrome.runtime.onMessage.addListener(onDataUpdated);
-
-
     // ---- AUTO-SEARCH при открытии ----
     ensureSearchParamsAndSearch();
 }
@@ -517,8 +513,6 @@ function applyPreset(presetId) {
 
     // Закрыть dropdown
     document.getElementById('preset-dropdown').classList.remove('open');
-
-
     // Вариант B: apply + auto-search
     doSearch();
 }
@@ -855,8 +849,6 @@ function ensureSearchParamsAndSearch() {
 
     setTimeout(() => doSearch(), 300);
 }
-
-
 async function doSearch() {
     const params = getSearchParams();
 
@@ -1494,8 +1486,6 @@ function updateBoardDots() {
         }
     }
 }
-
-
 
 // ============================================================
 // New Loads Bar — SSE уведомление о новых грузах

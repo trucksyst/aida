@@ -186,7 +186,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // ----- Harvesters -----
 
         case 'TOKEN_HARVESTED':
-            // Auth module (auth-dat.js) слушает через свой onMessage listener.
+            // Используется только для бордов с content scripts (TP).
+            // DAT harvester удалён — DAT использует direct fetch.
             sendResponse({ ok: true });
             break;
 
@@ -752,8 +753,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status !== 'complete') return;
     if (!tab?.url || !tab.windowId) return;
     if (!isBoardTab(tab.url)) return;
-
-
 
     // Инъекция харвестера TruckerPath в MAIN world после загрузки страницы — иначе перехват не срабатывает.
     if (tab.url.startsWith(TRUCKERPATH_LOADBOARD)) {

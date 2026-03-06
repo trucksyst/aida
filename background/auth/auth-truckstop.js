@@ -189,8 +189,6 @@ const AuthTruckstop = {
      * Возвращает: { ok: true, token } или { ok: false, reason }
      */
     async silentRefresh() {
-
-
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
         const currentToken = data[STORAGE_KEYS.token];
 
@@ -329,8 +327,6 @@ const AuthTruckstop = {
     async _fetchV5Token(userId) {
         if (!userId) return null;
         const url = `${TS_AUTH_CONFIG.authServiceUrl}/token/${userId}`;
-
-
         const resp = await fetch(url, {
             headers: {
                 'Accept': 'application/json',

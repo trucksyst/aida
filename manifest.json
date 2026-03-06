@@ -3,7 +3,7 @@
   "minimum_chrome_version": "114",
   "name": "AIDA — AI Dispatcher",
   "short_name": "AIDA",
-  "version": "0.1.65",
+  "version": "0.1.80",
   "description": "Персональный инструмент диспетчера. Агрегирует грузы со всех лоадбордов в одном окне.",
   "background": {
     "service_worker": "background/background.js",
@@ -25,7 +25,6 @@
     "https://freight.api.dat.com/*",
     "https://freight.api.prod.dat.com/*",
     "https://identity.api.dat.com/*",
-    "https://login.dat.com/*",
     "https://www.truckstop.com/*",
     "https://main.truckstop.com/*",
     "https://auth.truckstop.com/*",

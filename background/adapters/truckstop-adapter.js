@@ -396,8 +396,6 @@ const TruckstopAdapter = {
     // ---- Unified Contract ----
 
     async search(params) {
-
-
         const auth = await this._getAuth();
         if (!auth) {
             return {
@@ -487,8 +485,6 @@ const TruckstopAdapter = {
      */
     async _searchBuiltIn(params, token, claims) {
         // built-in GraphQL (единственный путь, не логируем)
-
-
         // Геокодируем origin
         let originLat = null, originLon = null;
         if (params?.origin && (params.origin.city || params.origin.state)) {
@@ -729,8 +725,6 @@ const TruckstopAdapter = {
         }
 
         this._offset += TS_PAGE_SIZE;
-
-
         const paramsWithOffset = { ...this._lastParams, offset: this._offset };
         const result = await this._searchBuiltIn(paramsWithOffset, auth.token, auth.claims);
 

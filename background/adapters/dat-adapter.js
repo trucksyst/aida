@@ -142,8 +142,6 @@ async function search(params) {
 
     await rateLimit();
     const body = buildGraphQLRequest(params, originPlace, destPlace);
-
-
     const resp = await fetch(GRAPHQL_URL, {
         method: 'POST',
         headers: {
@@ -864,8 +862,6 @@ const DatAdapter = {
 
         this._liveQueryNewCount = 0;
         chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
-
-
 
         const self = this;
         this._liveQuerySub = subscribeLiveQuery(this._lastSearchId, this._lastSearchToken, (eventType, data) => {

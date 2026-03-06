@@ -51,8 +51,6 @@ const AuthDat = {
      */
     login() {
         return new Promise((resolve, reject) => {
-
-
             chrome.windows.create({
                 url: 'https://one.dat.com/search-loads',
                 type: 'popup',
@@ -95,9 +93,7 @@ const AuthDat = {
                         const token = this._extractTokenFromUrl(url);
                         if (token) {
                             tokenCaptured = token;
-                            this._saveToken(token, 'login').then(() => {
-
-                            });
+                            this._saveToken(token, 'login');
                         }
                     }
                 };
@@ -124,24 +120,6 @@ const AuthDat = {
                     }
                 };
 
-                // Слушаем TOKEN_HARVESTED от харвестера (как fallback)
-                const onMessage = (message) => {
-                    if (resolved) return;
-                    if (message.type === 'TOKEN_HARVESTED' && message.board === 'dat') {
-                        tokenCaptured = message.token || tokenCaptured;
-
-                        setTimeout(() => {
-                            if (!resolved) {
-                                resolved = true;
-                                clearTimeout(timeout);
-                                cleanup();
-                                chrome.windows.remove(popupWindowId).catch(() => { });
-                                resolve({ ok: true, token: tokenCaptured });
-                            }
-                        }, 2000);
-                    }
-                };
-
                 // Если popup закрыт юзером
                 const onRemoved = (windowId) => {
                     if (windowId !== popupWindowId) return;
@@ -161,13 +139,11 @@ const AuthDat = {
                     chrome.tabs.onUpdated.removeListener(onUpdated);
                     chrome.tabs.onUpdated.removeListener(onCompleted);
                     chrome.windows.onRemoved.removeListener(onRemoved);
-                    chrome.runtime.onMessage.removeListener(onMessage);
                 };
 
                 chrome.tabs.onUpdated.addListener(onUpdated);
                 chrome.tabs.onUpdated.addListener(onCompleted);
                 chrome.windows.onRemoved.addListener(onRemoved);
-                chrome.runtime.onMessage.addListener(onMessage);
             });
         });
     },
@@ -303,14 +279,13 @@ const AuthDat = {
 
     /**
      * Сохранить токен + мета-данные в Storage.
-     * Пишет в тот же ключ `token:dat`, что и харвестер — совместимость 100%.
      */
     async _saveToken(token, source) {
         const now = Date.now();
         const meta = {
             issuedAt: now,
             expiresAt: now + (DAT_AUTH_CONFIG.tokenLifetimeSec * 1000),
-            source  // 'login' | 'silent_refresh' | 'harvester'
+            source  // 'login' | 'direct_fetch'
         };
         await chrome.storage.local.set({
             [STORAGE_KEYS.token]: token,

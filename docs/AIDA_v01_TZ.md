@@ -142,15 +142,20 @@ background/auth/
 
 **Silent Refresh:**
 
-- Токен DAT живёт 1 час. За 5 минут до истечения AuthDat автоматически запускает silent refresh.
-- Механизм: `login.dat.com/authorize?prompt=none` — Auth0 использует сохранённые cookies сессии для выдачи нового токена без логина.
+- Токен DAT живёт 30 минут (1800 сек). Стратегия «refresh at every use»: при каждом getToken() запускается fire-and-forget silentRefresh().
+- Механизм: прямой `fetch()` к `login.dat.com/authorize?prompt=none&response_mode=web_message` с Auth0 session cookies из `chrome.cookies` API.
+- Auth0 возвращает HTML с access_token в body → токен извлекается regex-ом.
+- Без табов, без окон, без offscreen, без харвестера — один HTTP-запрос.
 - Если сессия Auth0 мертва → статус борда → `'expired'` → пользователь видит пульсирующую кнопку и может перелогиниться кликом.
+
+**Silent Refresh Truckstop:**
+
+- Токен Truckstop обновляется через API: `POST https://v5-auth.truckstop.com/auth/renew` с текущим JWT.
+- Стратегия та же: «refresh at every use» + proactive refresh по alarm каждые 15 минут.
 
 **Совместимость:**
 
-- Харвестеры продолжают работать. Если пользователь открывает вкладку борда, токен ловится как раньше.
-- AuthManager добавляет мета-данные (expiry) при получении токена от харвестера.
-- Адаптеры читают токен из `Storage.getToken()` — без изменений.
+- DAT harvester **удалён** из manifest.json — не нужен для silent refresh.
 - Борд считается `connected` если есть актуальный токен. Открытая вкладка борда **не обязательна**.
 
 **UI — кнопки бордов (footer):**
