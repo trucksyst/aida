@@ -2,7 +2,7 @@
  * AIDA v0.1 — DAT Adapter (Autonomous Plugin)
  *
  * Полностью автономный адаптер — чёрный ящик.
- * Сам берёт токен через AuthManager, сам управляет SSE realtime.
+ * Сам берёт токен через AuthDat, сам управляет SSE realtime.
  * Core не знает деталей — только вызывает единый контракт:
  *   search(params), getStatus(), login(), disconnect(), fetchProfile()
  *
@@ -10,7 +10,7 @@
  */
 
 import Storage from '../storage.js';
-import AuthManager from '../auth/auth-manager.js';
+import AuthDat from '../auth/auth-dat.js';
 
 // ============================================================
 // Equipment codes — из example/content/dat-interceptor.js
@@ -96,7 +96,7 @@ async function search(params) {
     // Останавливаем предыдущую SSE-подписку
     DatAdapter._stopSSE();
 
-    const token = await AuthManager.getToken('dat');
+    const token = await AuthDat.getToken();
     if (!token) {
         console.warn('[AIDA/DAT] No token available');
         return {
@@ -917,11 +917,11 @@ const DatAdapter = {
     },
 
     // ============================================================
-    // Status / Login / Disconnect — прокси к AuthManager
+    // Status / Login / Disconnect — прямой вызов AuthDat
     // ============================================================
 
     async getStatus() {
-        const status = await AuthManager.getStatus('dat');
+        const status = await AuthDat.getStatus();
         return {
             connected: status === 'connected',
             status,
@@ -931,12 +931,12 @@ const DatAdapter = {
     },
 
     async login() {
-        return AuthManager.login('dat');
+        return AuthDat.login();
     },
 
     async disconnect() {
         this._stopSSE();
-        return AuthManager.disconnect('dat');
+        return AuthDat.disconnect();
     },
 
     // ============================================================
@@ -944,7 +944,7 @@ const DatAdapter = {
     // ============================================================
 
     async fetchProfile() {
-        const token = await AuthManager.getToken('dat');
+        const token = await AuthDat.getToken();
         if (!token) return;
 
         const resp = await fetch('https://identity.api.dat.com/account/v1/users', {

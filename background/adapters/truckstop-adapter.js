@@ -2,12 +2,12 @@
  * AIDA v0.1 — Truckstop Adapter (Autonomous Plugin)
  *
  * Полностью автономный адаптер — чёрный ящик.
- * Сам берёт токен через AuthManager, сам управляет auto-refresh и пагинацией.
+ * Сам берёт токен через AuthTruckstop, сам управляет auto-refresh и пагинацией.
  * Core не знает деталей — только вызывает единый контракт:
  *   search(params), startRealtime(params, onUpdate), stopRealtime(),
  *   loadMore(), getStatus(), login(), disconnect(), handleAlarm()
  */
-import AuthManager from '../auth/auth-manager.js';
+import AuthTruckstop from '../auth/auth-truckstop.js';
 
 const BOARD = 'truckstop';
 
@@ -386,7 +386,7 @@ const TruckstopAdapter = {
 
     /** Получить token + claims, вернуть { token, claims } или null если нет. */
     async _getAuth() {
-        const token = await AuthManager.getToken(BOARD);
+        const token = await AuthTruckstop.getToken();
         if (!token) return null;
         const claims = await this._getClaims();
         if (!claims || !claims.v5AccountId) return null;
@@ -696,8 +696,8 @@ const TruckstopAdapter = {
         // JWT протух → silent refresh → retry
         if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
             console.log('[AIDA/Truckstop] auto-refresh: JWT expired, trying silent refresh...');
-            const refreshed = await AuthManager.autoResolveAuthErrors([{ board: BOARD, error: result.error }]);
-            if (refreshed.resolved?.includes(BOARD)) {
+            const refreshResult = await AuthTruckstop.silentRefresh();
+            if (refreshResult.ok) {
                 result = await this.refreshNew(this._realtimeParams);
             }
         }
@@ -736,11 +736,11 @@ const TruckstopAdapter = {
     },
 
     // ============================================================
-    // Status / Login / Disconnect — прокси к AuthManager
+    // Status / Login / Disconnect — прямой вызов AuthTruckstop
     // ============================================================
 
     async getStatus() {
-        const status = await AuthManager.getStatus(BOARD);
+        const status = await AuthTruckstop.getStatus();
         return {
             connected: status === 'connected',
             status,
@@ -750,12 +750,12 @@ const TruckstopAdapter = {
     },
 
     async login() {
-        return AuthManager.login(BOARD);
+        return AuthTruckstop.login();
     },
 
     async disconnect() {
         this.stopRealtime();
-        return AuthManager.disconnect(BOARD);
+        return AuthTruckstop.disconnect();
     }
 };
 

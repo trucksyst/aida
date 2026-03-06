@@ -25,7 +25,7 @@ import Retell from './retell.js';
 import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter from './adapters/truckerpath-adapter.js';
-import AuthManager from './auth/auth-manager.js';
+import AuthTruckstop from './auth/auth-truckstop.js';
 
 // ============================================================
 // Adapter Registry — каждый адаптер — чёрный ящик с единым контрактом
@@ -97,11 +97,7 @@ async function getSettingsForUI() {
         let statusInfo = { connected: false, status: 'disconnected', hasToken: false, hasAuthModule: cfg.hasAuthModule };
 
         if (adapter.getStatus) {
-            // Адаптер сам знает свой статус (DAT/TS через AuthManager, TP через template)
             statusInfo = await adapter.getStatus();
-        } else if (cfg.hasAuthModule) {
-            const s = await AuthManager.getStatus(board);
-            statusInfo = { connected: s === 'connected', status: s, hasToken: s !== 'disconnected', hasAuthModule: true };
         }
 
         const tabOpen = await isBoardTabOpen(board);
@@ -271,8 +267,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'GET_SETTINGS':
             // Проактивно обновляем токены при открытии UI (fire-and-forget)
             for (const [board, cfg] of Object.entries(ADAPTERS)) {
-                if (cfg.hasAuthModule) {
-                    AuthManager.getToken(board).catch(() => { });
+                if (cfg.module.getToken) {
+                    cfg.module.getToken().catch(() => { });
                 }
             }
             getSettingsForUI().then(settings => sendResponse({ settings }));
@@ -352,7 +348,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // ----- Auth (новый блок) -----
         case 'LOGIN_BOARD': {
             const { board } = message;
-            AuthManager.login(board).then(async (result) => {
+            const adapter = ADAPTERS[board]?.module;
+            if (!adapter?.login) {
+                sendResponse({ ok: false, error: `No login for ${board}` });
+                return true;
+            }
+            adapter.login().then(async (result) => {
                 if (result.ok) {
                     await pushToUI({ settings: await getSettingsForUI() });
                 }
@@ -362,7 +363,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'DISCONNECT_BOARD': {
-            AuthManager.disconnect(message.board).then(async () => {
+            const adapter = ADAPTERS[message.board]?.module;
+            if (!adapter?.disconnect) {
+                sendResponse({ ok: false, error: `No disconnect for ${message.board}` });
+                return true;
+            }
+            adapter.disconnect().then(async () => {
                 await pushToUI({ settings: await getSettingsForUI() });
                 sendResponse({ ok: true });
             }).catch(err => sendResponse({ error: err.message }));
@@ -370,9 +376,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'GET_BOARD_AUTH_STATUS': {
-            AuthManager.getAllStatuses().then(statuses => {
+            // Собираем статусы через адаптеры напрямую
+            (async () => {
+                const statuses = {};
+                for (const [board, cfg] of Object.entries(ADAPTERS)) {
+                    if (cfg.module.getStatus) {
+                        statuses[board] = await cfg.module.getStatus();
+                    } else {
+                        statuses[board] = { connected: false, status: 'disconnected', hasToken: false, hasAuthModule: false };
+                    }
+                }
                 sendResponse({ statuses });
-            });
+            })();
             return true;
         }
 
@@ -441,7 +456,24 @@ async function searchLoads(params) {
     const activeAuthErrors = authErrors.filter(e => !disabled[e.board]);
     if (activeAuthErrors.length > 0) {
         console.log(`[AIDA/Core] Auth errors from ${activeAuthErrors.length} board(s):`, activeAuthErrors.map(e => e.board));
-        const { resolved } = await AuthManager.autoResolveAuthErrors(activeAuthErrors);
+        // autoResolveAuthErrors: попробовать silentRefresh, потом popup login
+        const resolved = [];
+        for (const { board } of activeAuthErrors) {
+            const adapter = ADAPTERS[board]?.module;
+            if (!adapter?.login) continue;
+            // Шаг 1: silent refresh
+            if (adapter.silentRefresh) {
+                try {
+                    const r = await adapter.silentRefresh();
+                    if (r?.ok) { resolved.push(board); continue; }
+                } catch (_) { /* ignore */ }
+            }
+            // Шаг 2: popup login
+            try {
+                const r = await adapter.login();
+                if (r?.ok) { resolved.push(board); continue; }
+            } catch (_) { /* ignore */ }
+        }
 
         if (resolved.length > 0) {
             console.log('[AIDA/Core] Re-trying boards after auth resolve:', resolved);
@@ -806,10 +838,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
         // Проактивно обновляем JWT Truckstop пока он ещё валидный
         (async () => {
             try {
-                const status = await AuthManager.getStatus('truckstop');
+                const status = await AuthTruckstop.getStatus();
                 if (status === 'disconnected') return; // не залогинен — не нужно
 
-                const result = await AuthManager.silentRefresh('truckstop');
+                const result = await AuthTruckstop.silentRefresh();
                 if (result?.ok) {
 
                     await pushToUI({ settings: await getSettingsForUI() });
@@ -835,10 +867,12 @@ async function init() {
     try {
         const boards = ['truckstop', 'dat'];
         for (const board of boards) {
-            const status = await AuthManager.getStatus(board);
-            if (status !== 'disconnected') {
-
-                AuthManager.getToken(board).catch(() => { });
+            const adapter = ADAPTERS[board]?.module;
+            if (adapter?.getStatus) {
+                const statusInfo = await adapter.getStatus();
+                if (statusInfo.status !== 'disconnected' && adapter.getToken) {
+                    adapter.getToken().catch(() => { });
+                }
             }
         }
     } catch (e) {
