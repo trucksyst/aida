@@ -295,12 +295,10 @@ function normalizeTruckstopRaw(raw) {
 
     const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? '');
     const pickupDate = originEarly ? originEarly.split('T')[0] : '';
-    const postedAt = str(raw.updatedOn || raw.createdOn || raw.postedAt || '');
-    if (!postedAt && raw._debugPosted === undefined) {
-        console.log('[AIDA/Truckstop] DEBUG postedAt empty. Raw keys with dates:',
-            Object.keys(raw).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('time') || k.toLowerCase().includes('created') || k.toLowerCase().includes('updated') || k.toLowerCase().includes('posted')),
-            'values:', { updatedOn: raw.updatedOn, createdOn: raw.createdOn, postedAt: raw.postedAt, originEarlyTime: raw.originEarlyTime });
-        raw._debugPosted = true;
+    // Truckstop timestamps — UTC без 'Z', добавляем для правильного парсинга
+    let postedAt = str(raw.updatedOn || raw.createdOn || raw.postedAt || '');
+    if (postedAt && !postedAt.endsWith('Z') && !postedAt.includes('+')) {
+        postedAt += 'Z';
     }
 
     // Notes: W×H + specialInfo
@@ -355,19 +353,6 @@ function normalizeTruckstopRaw(raw) {
 
 function normalizeTruckstopResults(rawList) {
     if (!Array.isArray(rawList)) return [];
-
-    // DEBUG: первые 10 raw — какие поля дат реально есть
-    rawList.slice(0, 10).forEach((r, i) => {
-        console.log(`[AIDA/TS] raw[${i}] dates:`, {
-            updatedOn: r.updatedOn,
-            createdOn: r.createdOn,
-            postedAt: r.postedAt,
-            originEarlyTime: r.originEarlyTime,
-            type_updatedOn: typeof r.updatedOn,
-            type_createdOn: typeof r.createdOn
-        });
-    });
-
     const out = rawList.filter(r => r && typeof r === 'object').map(r => normalizeTruckstopRaw(r)).filter(Boolean);
     console.log('[AIDA/Truckstop] Step: normalizeTruckstopResults', rawList.length, 'raw →', out.length, 'loads');
     return out;
