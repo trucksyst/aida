@@ -6,6 +6,12 @@
  * Обновления в реальном времени — push от Core (onMessage, type DATA_UPDATED).
  */
 
+/** Локальная дата YYYY-MM-DD (не UTC — toISOString даёт +1 день вечером в CST/EST). */
+function localDateStr(d) {
+    const dt = d || new Date();
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 // ============================================================
 // State
 // ============================================================
@@ -68,10 +74,9 @@ async function init() {
     state.loads = [];
     console.log('[AIDA/UI] Step: cleared old loads');
 
-    // Даты по умолчанию — сегодня
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('date-from').value = today;
-    document.getElementById('date-to').value = today;
+    // Даты по умолчанию — сегодня (LOCAL, не UTC)
+    document.getElementById('date-from').value = localDateStr();
+    document.getElementById('date-to').value = localDateStr();
 
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
     if (resp?.settings?.lastSearch) {
@@ -162,8 +167,9 @@ function applyLastSearch(lastSearch) {
         const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
         setEquipmentChecked(eqArr);
     }
-    // Даты: всегда сегодня (старые даты неактуальны — грузы за прошлые дни не ищутся)
-    const today = new Date().toISOString().split('T')[0];
+    // Даты: всегда сегодня LOCAL (не UTC — иначе вечером в CST/EST дата +1)
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setVal('date-from', today);
     setVal('date-to', today);
 }
@@ -486,8 +492,8 @@ function applyPreset(presetId) {
     const today = new Date();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    setVal('date-from', today.toISOString().split('T')[0]);
-    setVal('date-to', tomorrow.toISOString().split('T')[0]);
+    setVal('date-from', localDateStr(today));
+    setVal('date-to', localDateStr(tomorrow));
 
     // Закрыть dropdown
     document.getElementById('preset-dropdown').classList.remove('open');
@@ -820,10 +826,9 @@ function ensureSearchParamsAndSearch() {
         setVal('origin-city', 'Chicago, IL');
     }
 
-    // Даты: сегодня
-    const today = new Date().toISOString().split('T')[0];
-    setVal('date-from', today);
-    setVal('date-to', today);
+    // Даты: сегодня (LOCAL)
+    setVal('date-from', localDateStr());
+    setVal('date-to', localDateStr());
 
     // Equipment: Van
     setEquipmentChecked(['VAN']);
