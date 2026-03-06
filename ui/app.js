@@ -31,6 +31,27 @@ const state = {
     searchPresets: []   // max 8 saved search presets
 };
 
+/** Каскад свежести: Map<loadId, waveLevel> (0 = самые новые, 1 = предыдущая волна) */
+const _waveMap = new Map();
+
+/** Сдвинуть волны: 0→1, 1→удалить. Новые ID помечаются как wave 0. */
+function updateWaves(newLoads, prevLoadIds) {
+    // Сдвигаем существующие волны
+    for (const [id, wave] of _waveMap) {
+        if (wave >= 1) {
+            _waveMap.delete(id);
+        } else {
+            _waveMap.set(id, wave + 1);
+        }
+    }
+    // Новые ID (которых не было в предыдущем наборе) → wave 0
+    for (const load of newLoads) {
+        if (!prevLoadIds.has(load.id)) {
+            _waveMap.set(load.id, 0);
+        }
+    }
+}
+
 const MAX_PRESETS = 8;
 
 // ============================================================
@@ -181,7 +202,9 @@ function onDataUpdated(message) {
     const p = message.payload;
     let updated = [];
     if (p.loads !== undefined) {
+        const prevIds = new Set(state.loads.map(l => l.id));
         state.loads = p.loads;
+        updateWaves(p.loads, prevIds);
         updated.push('loads');
         renderTable();
         updateStatusBar();
@@ -849,6 +872,7 @@ async function doSearch() {
     showTableEmpty(false);
     showTableLoading(true);
     _hasMoreLoads = true; // сброс пагинации
+    _waveMap.clear();     // сброс каскада свежести
 
     try {
         console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
@@ -1006,11 +1030,10 @@ function renderRow(load) {
     const status = renderStatusBadge(load.status);
     const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
 
-    // Если груз создан < 3 мин назад — подсветка row-new
-    const NEW_THRESHOLD_MS = 3 * 60 * 1000;
-    const postedMs = load.postedAt ? new Date(load.postedAt).getTime() : 0;
-    const isNew = postedMs > 0 && (Date.now() - postedMs) < NEW_THRESHOLD_MS;
-    const rowClass = `status-${load.status || 'active'}${isNew ? ' row-new' : ''}`;
+    // Каскад свежести: wave-0 (яркий) / wave-1 (бледный) / обычный
+    const wave = _waveMap.get(load.id);
+    const waveClass = wave === 0 ? ' wave-0' : (wave === 1 ? ' wave-1' : '');
+    const rowClass = `status-${load.status || 'active'}${waveClass}`;
 
     return `
     <tr data-id="${esc(load.id)}" class="${rowClass}">

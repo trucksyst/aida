@@ -701,24 +701,23 @@ body {
     opacity: 0.7;
 }
 
-/* Новый груз (createdOn < 3 мин) — еле синий фон */
-#load-table tbody tr.row-new {
-    background: rgba(31, 111, 235, 0.08);
-    animation: row-new-fade 180s ease-out forwards;
+/* Каскад свежести: wave-0 — самые новые (яркий синий), wave-1 — предыдущая волна (бледный) */
+#load-table tbody tr.wave-0 {
+    background: rgba(31, 111, 235, 0.15);
+    transition: background 1s ease;
 }
 
-@keyframes row-new-fade {
-    0% {
-        background: rgba(31, 111, 235, 0.08);
-    }
-
-    100% {
-        background: transparent;
-    }
-}
-
-[data-theme="light"] #load-table tbody tr.row-new {
+#load-table tbody tr.wave-1 {
     background: rgba(31, 111, 235, 0.06);
+    transition: background 1s ease;
+}
+
+[data-theme="light"] #load-table tbody tr.wave-0 {
+    background: rgba(31, 111, 235, 0.12);
+}
+
+[data-theme="light"] #load-table tbody tr.wave-1 {
+    background: rgba(31, 111, 235, 0.04);
 }
 
 #load-table td {
