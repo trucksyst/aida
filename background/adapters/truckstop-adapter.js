@@ -355,6 +355,19 @@ function normalizeTruckstopRaw(raw) {
 
 function normalizeTruckstopResults(rawList) {
     if (!Array.isArray(rawList)) return [];
+
+    // DEBUG: первые 10 raw — какие поля дат реально есть
+    rawList.slice(0, 10).forEach((r, i) => {
+        console.log(`[AIDA/TS] raw[${i}] dates:`, {
+            updatedOn: r.updatedOn,
+            createdOn: r.createdOn,
+            postedAt: r.postedAt,
+            originEarlyTime: r.originEarlyTime,
+            type_updatedOn: typeof r.updatedOn,
+            type_createdOn: typeof r.createdOn
+        });
+    });
+
     const out = rawList.filter(r => r && typeof r === 'object').map(r => normalizeTruckstopRaw(r)).filter(Boolean);
     console.log('[AIDA/Truckstop] Step: normalizeTruckstopResults', rawList.length, 'raw →', out.length, 'loads');
     return out;
