@@ -833,10 +833,7 @@ async function handleTsAutoRefresh() {
     if (!tsToken || !claims) return;
 
     console.log('[AIDA/Core] Truckstop auto-refresh: fetching new loads...');
-    // Даты: всегда сегодня (auto-refresh не использует сохранённые даты)
-    const today = new Date().toISOString().split('T')[0];
-    const refreshParams = { ..._tsRefreshParams, dateFrom: today, dateTo: today };
-    let result = await TruckstopAdapter.refreshNew(refreshParams, { token: tsToken, claims });
+    let result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
 
     // JWT протух → silent refresh → retry
     if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
@@ -845,7 +842,7 @@ async function handleTsAutoRefresh() {
         if (refreshed.resolved?.includes('truckstop')) {
             const freshToken = await Storage.getToken('truckstop');
             const freshClaims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
-            result = await TruckstopAdapter.refreshNew(refreshParams, { token: freshToken, claims: freshClaims });
+            result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: freshToken, claims: freshClaims });
         }
     }
 
