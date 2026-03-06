@@ -934,6 +934,10 @@ const DatAdapter = {
         return AuthDat.login();
     },
 
+    async silentRefresh() {
+        return AuthDat.silentRefresh();
+    },
+
     async disconnect() {
         this._stopSSE();
         return AuthDat.disconnect();

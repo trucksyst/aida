@@ -770,6 +770,10 @@ const TruckstopAdapter = {
         return AuthTruckstop.login();
     },
 
+    async silentRefresh() {
+        return AuthTruckstop.silentRefresh();
+    },
+
     async disconnect() {
         this.stopRealtime();
         return AuthTruckstop.disconnect();

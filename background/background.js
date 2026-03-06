@@ -461,15 +461,22 @@ async function searchLoads(params) {
     const activeAuthErrors = authErrors.filter(e => !disabled[e.board]);
     if (activeAuthErrors.length > 0) {
         console.log(`[AIDA/Core] Auth errors from ${activeAuthErrors.length} board(s):`, activeAuthErrors.map(e => e.board));
-        // autoResolveAuthErrors: только silent refresh через getToken()
-        // Popup НЕ открываем автоматически — только по клику юзера
+        // autoResolveAuthErrors: попробовать silentRefresh, потом popup login
         const resolved = [];
         for (const { board } of activeAuthErrors) {
             const adapter = ADAPTERS[board]?.module;
-            if (!adapter?.getToken) continue;
+            if (!adapter?.login) continue;
+            // Шаг 1: silent refresh
+            if (adapter.silentRefresh) {
+                try {
+                    const r = await adapter.silentRefresh();
+                    if (r?.ok) { resolved.push(board); continue; }
+                } catch (_) { /* ignore */ }
+            }
+            // Шаг 2: popup login
             try {
-                const token = await adapter.getToken();
-                if (token) { resolved.push(board); continue; }
+                const r = await adapter.login();
+                if (r?.ok) { resolved.push(board); continue; }
             } catch (_) { /* ignore */ }
         }
 
