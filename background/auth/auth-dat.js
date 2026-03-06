@@ -201,13 +201,14 @@ const AuthDat = {
         const url = `${DAT_AUTH_CONFIG.authorizeUrl}?${params.toString()}`;
 
         return new Promise((resolve) => {
-            chrome.tabs.create({ url, active: false }, (tab) => {
-                if (!tab) {
-                    resolve({ ok: false, reason: 'Failed to create refresh tab' });
+            chrome.windows.create({ url, type: 'popup', state: 'minimized', focused: false, width: 1, height: 1 }, (win) => {
+                if (!win || !win.tabs?.[0]) {
+                    resolve({ ok: false, reason: 'Failed to create refresh window' });
                     return;
                 }
 
-                const tabId = tab.id;
+                const tabId = win.tabs[0].id;
+                const winId = win.id;
                 let resolved = false;
 
                 const finish = (ok, token, reason) => {
@@ -215,8 +216,7 @@ const AuthDat = {
                     resolved = true;
                     clearTimeout(timeout);
                     chrome.tabs.onUpdated.removeListener(onUpdated);
-                    chrome.tabs.onRemoved.removeListener(onRemoved);
-                    chrome.tabs.remove(tabId).catch(() => { });
+                    chrome.windows.remove(winId).catch(() => { });
                     if (ok && token) {
                         this._saveToken(token, 'silent_refresh_prompt_none').then(() => {
                             console.log('[AIDA/Auth/DAT] Step: token refreshed (prompt=none)');
@@ -253,7 +253,6 @@ const AuthDat = {
                             });
                             const bodyText = results?.[0]?.result || '';
 
-                            // Auth0 web_message: HTML содержит JSON с access_token
                             const tokenMatch = bodyText.match(/"access_token"\s*:\s*"([^"]+)"/);
                             if (tokenMatch?.[1]) {
                                 console.log('[AIDA/Auth/DAT] Silent refresh: token from HTML body');
@@ -261,7 +260,6 @@ const AuthDat = {
                                 return;
                             }
 
-                            // Auth0 error
                             const errorMatch = bodyText.match(/"error"\s*:\s*"([^"]+)"/);
                             if (errorMatch?.[1]) {
                                 console.warn('[AIDA/Auth/DAT] Silent refresh Auth0 error:', errorMatch[1]);
@@ -276,14 +274,7 @@ const AuthDat = {
                     }
                 };
 
-                const onRemoved = (removedTabId) => {
-                    if (removedTabId === tabId && !resolved) {
-                        finish(false, null, 'tab_closed');
-                    }
-                };
-
                 chrome.tabs.onUpdated.addListener(onUpdated);
-                chrome.tabs.onRemoved.addListener(onRemoved);
             });
         });
     },
@@ -296,91 +287,91 @@ const AuthDat = {
      * - Токена нет → null
      */
     async getToken() {
-    const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
-    const token = data[STORAGE_KEYS.token];
-    const meta = data[STORAGE_KEYS.tokenMeta];
+        const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
+        const token = data[STORAGE_KEYS.token];
+        const meta = data[STORAGE_KEYS.tokenMeta];
 
-    if (!token) return null;
+        if (!token) return null;
 
-    if (meta?.expiresAt) {
-        const now = Date.now();
+        if (meta?.expiresAt) {
+            const now = Date.now();
 
-        if (now >= meta.expiresAt) {
-            // Токен протух → блокирующий refresh
-            console.log('[AIDA/Auth/DAT] Token expired, attempting silent refresh');
-            const result = await this.silentRefresh();
-            if (result.ok) return result.token;
-            return null;
+            if (now >= meta.expiresAt) {
+                // Токен протух → блокирующий refresh
+                console.log('[AIDA/Auth/DAT] Token expired, attempting silent refresh');
+                const result = await this.silentRefresh();
+                if (result.ok) return result.token;
+                return null;
+            }
         }
-    }
 
-    // Токен жив → вернуть + refresh в фоне (fire-and-forget)
-    // К следующему запросу токен будет гарантированно свежий
-    this.silentRefresh().catch(() => { });
-    return token;
-},
+        // Токен жив → вернуть + refresh в фоне (fire-and-forget)
+        // К следующему запросу токен будет гарантированно свежий
+        this.silentRefresh().catch(() => { });
+        return token;
+    },
 
     /**
      * Статус подключения.
      */
     async getStatus() {
-    const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
-    const token = data[STORAGE_KEYS.token];
-    const meta = data[STORAGE_KEYS.tokenMeta];
+        const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
+        const token = data[STORAGE_KEYS.token];
+        const meta = data[STORAGE_KEYS.tokenMeta];
 
-    if (!token) return 'disconnected';
+        if (!token) return 'disconnected';
 
-    if (meta?.expiresAt && Date.now() >= meta.expiresAt) {
-        return 'expired';
-    }
+        if (meta?.expiresAt && Date.now() >= meta.expiresAt) {
+            return 'expired';
+        }
 
-    return 'connected';
-},
+        return 'connected';
+    },
 
     /**
      * Отключить борд — удалить токен.
      */
     async disconnect() {
-    await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
-    console.log('[AIDA/Auth/DAT] Disconnected');
-},
+        await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
+        console.log('[AIDA/Auth/DAT] Disconnected');
+    },
 
-// ============================================================
-// Internal
-// ============================================================
+    // ============================================================
+    // Internal
+    // ============================================================
 
-/**
- * Извлечь access_token из URL callback#access_token=...&token_type=Bearer&...
- */
-_extractTokenFromUrl(url) {
-    try {
-        const hashIndex = url.indexOf('#');
-        if (hashIndex === -1) return null;
-        const hash = url.substring(hashIndex + 1);
-        const params = new URLSearchParams(hash);
-        return params.get('access_token') || null;
-    } catch (e) {
-        console.warn('[AIDA/Auth/DAT] _extractTokenFromUrl error:', e.message);
-        return null;
-    }
-},
+    /**
+     * Извлечь access_token из URL callback#access_token=...&token_type=Bearer&...
+     */
+    _extractTokenFromUrl(url) {
+        try {
+            const hashIndex = url.indexOf('#');
+            if (hashIndex === -1) return null;
+            const hash = url.substring(hashIndex + 1);
+            const params = new URLSearchParams(hash);
+            return params.get('access_token') || null;
+        } catch (e) {
+            console.warn('[AIDA/Auth/DAT] _extractTokenFromUrl error:', e.message);
+            return null;
+        }
+    },
 
     /**
      * Сохранить токен + мета-данные в Storage.
      * Пишет в тот же ключ `token:dat`, что и харвестер — совместимость 100%.
      */
     async _saveToken(token, source) {
-    const now = Date.now();
-    const meta = {
-        issuedAt: now,
-        expiresAt: now + (DAT_AUTH_CONFIG.tokenLifetimeSec * 1000),
-        source  // 'login' | 'silent_refresh' | 'harvester'
-    };
-    await chrome.storage.local.set({
-        [STORAGE_KEYS.token]: token,
-        [STORAGE_KEYS.tokenMeta]: meta
-    });
-}
+        const now = Date.now();
+        const meta = {
+            issuedAt: now,
+            expiresAt: now + (DAT_AUTH_CONFIG.tokenLifetimeSec * 1000),
+            source  // 'login' | 'silent_refresh' | 'harvester'
+        };
+        await chrome.storage.local.set({
+            [STORAGE_KEYS.token]: token,
+            [STORAGE_KEYS.tokenMeta]: meta
+        });
+    }
 };
 
 export default AuthDat;

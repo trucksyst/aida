@@ -269,11 +269,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'GET_SETTINGS':
             // Проактивно обновляем токены при открытии UI (fire-and-forget)
-            for (const [board, cfg] of Object.entries(ADAPTERS)) {
-                if (cfg.hasAuthModule) {
-                    AuthManager.getToken(board).catch(() => { });
+            Storage.loadSettings().then(s => {
+                const disabled = s.disabledBoards || {};
+                for (const [board, cfg] of Object.entries(ADAPTERS)) {
+                    if (cfg.hasAuthModule && !disabled[board]) {
+                        AuthManager.getToken(board).catch(() => { });
+                    }
                 }
-            }
+            }).catch(() => { });
             getSettingsForUI().then(settings => sendResponse({ settings }));
             return true;
 
