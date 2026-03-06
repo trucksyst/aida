@@ -158,6 +158,27 @@ background/auth/
 - DAT harvester **удалён** из manifest.json — не нужен для silent refresh.
 - Борд считается `connected` если есть актуальный токен. Открытая вкладка борда **не обязательна**.
 
+**Исследование DAT Auth API (справка):**
+
+- Прямого API endpoint для обновления токена (аналог Truckstop `/auth/renew`) **нет**.
+- DAT использует Auth0 JS SDK v9.30.0 (`getTokenSilently()`).
+- Реализован **direct fetch** — `fetch()` к `login.dat.com/authorize?prompt=none&response_mode=web_message` с cookies из `chrome.cookies` API.
+- Auth0 возвращает HTML: `{type: "authorization_response", response: {access_token: "eyJ..."}}` — токен парсится regex.
+- Auth0 config: `client_id=e9lzMXbnWNJ0D50C2haado7DiW1akwaC`, `audience=https://prod-api.dat.com`.
+- JWT lifetime: **1800 сек (30 мин)**, подтверждено из HAR (`iat`/`exp`).
+- Исследованные endpoints: `identity.api.dat.com/auth/token/authorizations/v1` (permissions, не токен), `usurp/v1/session/status` (usurp check), `login.dat.com/userinfo` (профиль, не токен).
+
+**Исследование Truckstop GraphQL API (справка):**
+
+- GraphQL endpoint: `https://loadsearch-graphql-api-prod.truckstop.com/v1/graphql` — **не требует Authorization header**.
+- Авторизация через user-specific IDs в GraphQL variables (не через HTTP headers).
+- User IDs берутся из JWT claims: `v5AccountId` → `carrier_id`, `accountUserId` → `gl_carrier_user_id`, `v5AccountUserId` → `account_user_id`.
+- Claims парсятся из JWT через `auth-truckstop.js._decodeJwtClaims()`.
+- Два GraphQL query: `LoadSearchSortByBinRateDesc` (основной), `LoadSearchSortByUpdatedOnDesc` (auto-refresh).
+- Fragment: `GridLoadSearchFields on loads_grid_ret_type` — все поля грузов.
+- Доп. endpoints: `user-preferences-api.truckstop.com/user` (профиль), `accounts/factoring-company` (факторинг, может 404).
+
+
 **UI — кнопки бордов (footer):**
 
 | Состояние        | Визуал          | Клик                    | Правый клик      |
