@@ -82,7 +82,7 @@ async function init() {
     const buildEl = document.getElementById('status-build');
     if (buildEl) buildEl.textContent = `v${buildVersion}`;
     const resp = await sendToCore('GET_SETTINGS');
-    console.log('[AIDA/UI] Step: GET_SETTINGS', resp?.settings ? 'ok' : 'empty');
+
     if (resp?.settings) {
         state.settings = resp.settings;
         applySettings(resp.settings);
@@ -91,7 +91,7 @@ async function init() {
     // Очищаем старые грузы при открытии — каждый раз чистый старт
     await sendToCore('CLEAR_LOADS');
     state.loads = [];
-    console.log('[AIDA/UI] Step: cleared old loads');
+
 
     // Даты по умолчанию — сегодня (LOCAL, не UTC)
     document.getElementById('date-from').value = localDateStr();
@@ -100,7 +100,7 @@ async function init() {
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
     if (resp?.settings?.lastSearch) {
         applyLastSearch(resp.settings.lastSearch);
-        console.log('[AIDA/UI] Step: applied last search (origin, destination, equipment)');
+
     }
 
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
@@ -114,7 +114,7 @@ async function init() {
 
     // Единственная подписка на обновления — push от Core (контракт API)
     chrome.runtime.onMessage.addListener(onDataUpdated);
-    console.log('[AIDA/UI] Step: init done. Listening for DATA_UPDATED from Core.');
+
 
     // ---- AUTO-SEARCH при открытии ----
     ensureSearchParamsAndSearch();
@@ -195,7 +195,7 @@ function applyLastSearch(lastSearch) {
 // ============================================================
 
 function onDataUpdated(message) {
-    console.log('[AIDA/UI] onMessage received:', message?.type, message?.payload ? Object.keys(message.payload).join(',') : 'no payload');
+
     if (message.type !== 'DATA_UPDATED' || !message.payload) return;
     const p = message.payload;
     let updated = [];
@@ -232,7 +232,7 @@ function onDataUpdated(message) {
         state.lastRefreshTime = p.lastRefreshTime;
         updateRefreshTimer();
     }
-    if (updated.length) console.log('[AIDA/UI] Step: DATA_UPDATED →', updated.join(', '));
+
 }
 
 // ============================================================
@@ -440,7 +440,7 @@ async function loadSearchPresets() {
         state.searchPresets = [];
     }
     renderPresetDropdown();
-    console.log('[AIDA/UI] Step: loaded search presets, count:', state.searchPresets.length);
+
 }
 
 /** Persist current presets array to chrome.storage.local. */
@@ -494,7 +494,7 @@ async function handlePresetSave() {
     await savePresetsToStorage();
     renderPresetDropdown();
     showToast('Preset saved ✓');
-    console.log('[AIDA/UI] Step: preset saved:', presetLabel(p));
+
     // Вариант B: save + search
     doSearch();
 }
@@ -518,7 +518,7 @@ function applyPreset(presetId) {
     // Закрыть dropdown
     document.getElementById('preset-dropdown').classList.remove('open');
 
-    console.log('[AIDA/UI] Step: preset applied:', presetLabel(p));
+
     // Вариант B: apply + auto-search
     doSearch();
 }
@@ -529,7 +529,7 @@ async function deletePreset(presetId) {
     await savePresetsToStorage();
     renderPresetDropdown();
     showToast('Preset deleted');
-    console.log('[AIDA/UI] Step: preset deleted, remaining:', state.searchPresets.length);
+
 }
 
 /** Render the presets dropdown items. */
@@ -775,7 +775,7 @@ async function loadMore() {
         }
         if (resp?.hasMore === false) {
             _hasMoreLoads = false;
-            console.log('[AIDA/UI] No more loads to fetch');
+
         }
     } catch (e) {
         console.warn('[AIDA/UI] loadMore error:', e);
@@ -859,7 +859,7 @@ function ensureSearchParamsAndSearch() {
 
 async function doSearch() {
     const params = getSearchParams();
-    console.log('[AIDA/UI] Step: doSearch params', JSON.stringify(params));
+
     if (!params.origin.city && !params.origin.state) {
         showToast('Enter origin city or state', 'error');
         return;
@@ -875,9 +875,9 @@ async function doSearch() {
     _waveMap.clear();     // сброс каскада свежести
 
     try {
-        console.log('[AIDA/UI] Step: sending SEARCH_LOADS to Core');
+
         const resp = await sendToCore('SEARCH_LOADS', { params });
-        console.log('[AIDA/UI] Step: SEARCH_LOADS response', resp?.error ? 'error: ' + resp.error : 'loads: ' + (Array.isArray(resp) ? resp.length : (resp?.loads?.length ?? 0)));
+
         const result = resp?.loads !== undefined ? resp : (Array.isArray(resp) ? { loads: resp } : resp);
         if (result?.error) {
             showToast('Search error: ' + result.error, 'error');

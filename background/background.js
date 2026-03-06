@@ -168,7 +168,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
         const aidaTabs = await chrome.tabs.query({ url: AIDA_UI_URL + '*' });
         if (aidaTabs.length === 0) {
             await Storage.setLoads([]);
-            console.log('[AIDA/Core] AIDA tab closed — loads cleared');
+
         }
     } catch (e) {
         // Tab query может упасть если браузер закрывается
@@ -262,21 +262,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'CLEAR_LOADS':
             Storage.setLoads([]).then(() => {
-                console.log('[AIDA/Core] Loads cleared');
+
                 sendResponse({ ok: true });
             }).catch(err => sendResponse({ error: err.message }));
             return true;
 
         case 'GET_SETTINGS':
             // Проактивно обновляем токены при открытии UI (fire-and-forget)
-            Storage.loadSettings().then(s => {
-                const disabled = s.disabledBoards || {};
-                for (const [board, cfg] of Object.entries(ADAPTERS)) {
-                    if (cfg.hasAuthModule && !disabled[board]) {
-                        AuthManager.getToken(board).catch(() => { });
-                    }
+            for (const [board, cfg] of Object.entries(ADAPTERS)) {
+                if (cfg.hasAuthModule) {
+                    AuthManager.getToken(board).catch(() => { });
                 }
-            }).catch(() => { });
+            }
             getSettingsForUI().then(settings => sendResponse({ settings }));
             return true;
 
@@ -305,10 +302,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     const loads = await Storage.getLoads();
                     const filtered = loads.filter(l => l.board !== board);
                     await Storage.setLoads(filtered);
-                    console.log(`[AIDA/Core] Board ${board} disabled — removed ${loads.length - filtered.length} loads`);
+
                     await pushToUI({ loads: filtered, settings: await getSettingsForUI() });
                 } else {
-                    console.log(`[AIDA/Core] Board ${board} enabled`);
+
                     await pushToUI({ settings: await getSettingsForUI() });
                 }
                 sendResponse({ ok: true });
@@ -564,7 +561,7 @@ async function saveBookmark(loadId) {
 
     await Storage.updateLoadStatus(loadId, 'saved');
     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
-    console.log('[AIDA/Core] Step: saveBookmark done → pushToUI(loads, bookmarks)');
+
     return { ok: true };
 }
 
@@ -575,7 +572,7 @@ async function saveBookmark(loadId) {
 async function removeBookmark(loadId) {
     await Storage.removeBookmark(loadId);
     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
-    console.log('[AIDA/Core] Step: removeBookmark done → pushToUI(loads, bookmarks)');
+
 }
 
 // ============================================================
@@ -617,7 +614,7 @@ async function callBroker(loadId) {
             miles: load.miles
         });
         await pushToUI({ loads: await Storage.getLoads(), history: await Storage.getHistory({}) });
-        console.log('[AIDA/Core] Step: callBroker (call) done → pushToUI(loads, history)');
+
         return { ok: result.ok, action: 'call', callId: result.callId, error: result.error };
 
     } else if (load.broker?.email) {
@@ -637,7 +634,7 @@ async function callBroker(loadId) {
             miles: load.miles
         });
         await pushToUI({ loads: await Storage.getLoads(), history: await Storage.getHistory({}) });
-        console.log('[AIDA/Core] Step: callBroker (email) done → pushToUI(loads, history)');
+
         return { ok: true, action: 'email', email };
     }
 
@@ -812,13 +809,13 @@ chrome.alarms.onAlarm.addListener(alarm => {
             try {
                 const status = await AuthManager.getStatus('truckstop');
                 if (status === 'disconnected') return; // не залогинен — не нужно
-                console.log('[AIDA/Core] Proactive TS token refresh...');
+
                 const result = await AuthManager.silentRefresh('truckstop');
                 if (result?.ok) {
-                    console.log('[AIDA/Core] Proactive TS refresh OK');
+
                     await pushToUI({ settings: await getSettingsForUI() });
                 } else {
-                    console.log('[AIDA/Core] Proactive TS refresh skipped:', result?.reason || 'no result');
+
                 }
             } catch (e) {
                 console.warn('[AIDA/Core] Proactive TS refresh error:', e.message);
@@ -841,7 +838,7 @@ async function init() {
         for (const board of boards) {
             const status = await AuthManager.getStatus(board);
             if (status !== 'disconnected') {
-                console.log(`[AIDA/Core] Init: refreshing token for ${board}...`);
+
                 AuthManager.getToken(board).catch(() => { });
             }
         }

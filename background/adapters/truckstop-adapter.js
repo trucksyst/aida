@@ -215,7 +215,7 @@ async function geocodeOrigin(origin) {
     if (!origin || (!origin.city && !origin.state)) return null;
     const q = [origin.city, origin.state].filter(Boolean).join(', ') + ', USA';
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
-    console.log('[AIDA/Truckstop] Step: geocodeOrigin', q);
+
     try {
         const resp = await fetch(url, {
             headers: { 'Accept': 'application/json', 'User-Agent': 'AIDA/1.0 (Chrome Extension)' }
@@ -247,19 +247,19 @@ function findLoadsArray(obj, logKey) {
         // loadSearch.items (новый API)
         const loadSearch = d.loadSearch || d.LoadSearch;
         if (loadSearch && loadSearch.items && Array.isArray(loadSearch.items)) {
-            if (logKey) console.log('[AIDA/Truckstop] Step: findLoadsArray → data.loadSearch.items, len=', loadSearch.items.length);
+
             return loadSearch.items;
         }
         for (const k in d) {
             if (!Object.prototype.hasOwnProperty.call(d, k)) continue;
             const arr = d[k];
             if (Array.isArray(arr) && arr.length > 0) {
-                if (logKey) console.log('[AIDA/Truckstop] Step: findLoadsArray → data.' + k + ', len=', arr.length);
+
                 return arr;
             }
         }
     }
-    if (logKey) console.log('[AIDA/Truckstop] Step: findLoadsArray — no array, data keys:', d ? Object.keys(d).slice(0, 12).join(', ') : 'none');
+
     return null;
 }
 
@@ -357,7 +357,7 @@ function normalizeTruckstopRaw(raw) {
 function normalizeTruckstopResults(rawList) {
     if (!Array.isArray(rawList)) return [];
     const out = rawList.filter(r => r && typeof r === 'object').map(r => normalizeTruckstopRaw(r)).filter(Boolean);
-    console.log('[AIDA/Truckstop] Step: normalizeTruckstopResults', rawList.length, 'raw →', out.length, 'loads');
+
     return out;
 }
 
@@ -396,7 +396,7 @@ const TruckstopAdapter = {
     // ---- Unified Contract ----
 
     async search(params) {
-        console.log('[AIDA/Truckstop] Step: search called, params=', JSON.stringify(params || {}).slice(0, 120));
+
 
         const auth = await this._getAuth();
         if (!auth) {
@@ -531,7 +531,7 @@ const TruckstopAdapter = {
         const eqIds = getEquipmentIds(params);
         if (eqIds) {
             args.equipment_ids = eqIds;
-            console.log('[AIDA/Truckstop] Step: equipment_ids =', eqIds);
+
         }
 
         const body = JSON.stringify({
@@ -569,9 +569,6 @@ const TruckstopAdapter = {
             }
             if (!text || text.trim().charAt(0) === '<') return { ok: true, loads: [], meta: { board: BOARD } };
             const data = JSON.parse(text);
-            // DEBUG: что именно вернул Hasura
-            console.log('[AIDA/Truckstop] _doFetch response keys:', Object.keys(data), 'status:', resp.status,
-                data.errors ? 'ERRORS: ' + JSON.stringify(data.errors).slice(0, 300) : 'no errors');
 
             // JWT expired → вернуть AUTH_REQUIRED для auto-resolve
             if (data.errors && !data.data) {
@@ -683,7 +680,7 @@ const TruckstopAdapter = {
     _startPolling() {
         this._stopPolling();
         chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
-        console.log('[AIDA/Truckstop] auto-refresh started (every 30s)');
+
     },
 
     _stopPolling() {
@@ -732,7 +729,7 @@ const TruckstopAdapter = {
         }
 
         this._offset += TS_PAGE_SIZE;
-        console.log(`[AIDA/Truckstop] loadMore: offset=${this._offset}`);
+
 
         const paramsWithOffset = { ...this._lastParams, offset: this._offset };
         const result = await this._searchBuiltIn(paramsWithOffset, auth.token, auth.claims);

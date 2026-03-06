@@ -51,7 +51,7 @@ const AuthDat = {
      */
     login() {
         return new Promise((resolve, reject) => {
-            console.log('[AIDA/Auth/DAT] Step: opening login popup (one.dat.com/search-loads)');
+
 
             chrome.windows.create({
                 url: 'https://one.dat.com/search-loads',
@@ -96,7 +96,7 @@ const AuthDat = {
                         if (token) {
                             tokenCaptured = token;
                             this._saveToken(token, 'login').then(() => {
-                                console.log('[AIDA/Auth/DAT] Step: token captured from callback. Popup stays open for usurp modal.');
+
                             });
                         }
                     }
@@ -111,7 +111,7 @@ const AuthDat = {
                     const url = tab.url || '';
                     // Если search-loads загрузился и токен уже пойман → ждём 3 сек и закрываем
                     if (url.includes('one.dat.com/search-loads') && tokenCaptured) {
-                        console.log('[AIDA/Auth/DAT] Step: search-loads loaded + token captured. Closing in 3s...');
+
                         setTimeout(() => {
                             if (!resolved) {
                                 resolved = true;
@@ -129,7 +129,7 @@ const AuthDat = {
                     if (resolved) return;
                     if (message.type === 'TOKEN_HARVESTED' && message.board === 'dat') {
                         tokenCaptured = message.token || tokenCaptured;
-                        console.log('[AIDA/Auth/DAT] Step: token from harvester. Closing in 2s...');
+
                         setTimeout(() => {
                             if (!resolved) {
                                 resolved = true;
@@ -174,16 +174,10 @@ const AuthDat = {
 
     /**
      * Silent refresh — обновить токен без участия пользователя.
-     * Auth0 prompt=none + response_mode=web_message:
-     * 1. Скрытый таб → login.dat.com/authorize?prompt=none&response_mode=web_message
-     * 2. Auth0 проверяет session cookies → HTML с access_token в body
-     * 3. chrome.scripting.executeScript → regex token extraction
-     * 4. Закрываем таб
-     * Без харвестера, без TOKEN_HARVESTED.
+     * Прямой fetch к Auth0 с cookies из chrome.cookies API.
+     * Без табов, окон, offscreen — один HTTP-запрос.
      */
     async silentRefresh() {
-        console.log('[AIDA/Auth/DAT] Step: attempting silent refresh (prompt=none)');
-
         const nonce = crypto.randomUUID().replace(/-/g, '');
         const state = crypto.randomUUID().replace(/-/g, '');
 
@@ -200,83 +194,34 @@ const AuthDat = {
         });
         const url = `${DAT_AUTH_CONFIG.authorizeUrl}?${params.toString()}`;
 
-        return new Promise((resolve) => {
-            chrome.windows.create({ url, type: 'popup', state: 'minimized', focused: false, width: 1, height: 1 }, (win) => {
-                if (!win || !win.tabs?.[0]) {
-                    resolve({ ok: false, reason: 'Failed to create refresh window' });
-                    return;
-                }
+        try {
+            const cookies = await chrome.cookies.getAll({ domain: 'login.dat.com' });
+            if (!cookies.length) return { ok: false, reason: 'no_auth0_cookies' };
 
-                const tabId = win.tabs[0].id;
-                const winId = win.id;
-                let resolved = false;
-
-                const finish = (ok, token, reason) => {
-                    if (resolved) return;
-                    resolved = true;
-                    clearTimeout(timeout);
-                    chrome.tabs.onUpdated.removeListener(onUpdated);
-                    chrome.windows.remove(winId).catch(() => { });
-                    if (ok && token) {
-                        this._saveToken(token, 'silent_refresh_prompt_none').then(() => {
-                            console.log('[AIDA/Auth/DAT] Step: token refreshed (prompt=none)');
-                            resolve({ ok: true, token });
-                        });
-                    } else {
-                        resolve({ ok: false, reason: reason || 'unknown' });
-                    }
-                };
-
-                const timeout = setTimeout(() => {
-                    console.warn('[AIDA/Auth/DAT] Silent refresh timeout (15s)');
-                    finish(false, null, 'timeout');
-                }, 15000);
-
-                const onUpdated = async (updatedTabId, changeInfo) => {
-                    if (resolved || updatedTabId !== tabId) return;
-
-                    const navUrl = changeInfo.url || '';
-
-                    // Auth0 вернул login page → сессия мертва
-                    if (navUrl.includes('login.dat.com/u/login')) {
-                        console.log('[AIDA/Auth/DAT] Silent refresh: session expired');
-                        finish(false, null, 'session_expired');
-                        return;
-                    }
-
-                    // Страница загрузилась → извлекаем токен из HTML body
-                    if (changeInfo.status === 'complete') {
-                        try {
-                            const results = await chrome.scripting.executeScript({
-                                target: { tabId },
-                                func: () => document.body?.innerText || document.body?.textContent || ''
-                            });
-                            const bodyText = results?.[0]?.result || '';
-
-                            const tokenMatch = bodyText.match(/"access_token"\s*:\s*"([^"]+)"/);
-                            if (tokenMatch?.[1]) {
-                                console.log('[AIDA/Auth/DAT] Silent refresh: token from HTML body');
-                                finish(true, tokenMatch[1]);
-                                return;
-                            }
-
-                            const errorMatch = bodyText.match(/"error"\s*:\s*"([^"]+)"/);
-                            if (errorMatch?.[1]) {
-                                console.warn('[AIDA/Auth/DAT] Silent refresh Auth0 error:', errorMatch[1]);
-                                finish(false, null, `auth0_${errorMatch[1]}`);
-                                return;
-                            }
-
-                            console.warn('[AIDA/Auth/DAT] Silent refresh: no token in body, len:', bodyText.length);
-                        } catch (e) {
-                            console.warn('[AIDA/Auth/DAT] Silent refresh executeScript error:', e.message);
-                        }
-                    }
-                };
-
-                chrome.tabs.onUpdated.addListener(onUpdated);
+            const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            const resp = await fetch(url, {
+                headers: { 'Cookie': cookieStr },
+                redirect: 'follow'
             });
-        });
+            const html = await resp.text();
+
+            const tokenMatch = html.match(/"access_token"\s*:\s*"([^"]+)"/);
+            if (tokenMatch?.[1]) {
+                await this._saveToken(tokenMatch[1], 'direct_fetch');
+                return { ok: true, token: tokenMatch[1] };
+            }
+
+            const errorMatch = html.match(/"error"\s*:\s*"([^"]+)"/);
+            if (errorMatch?.[1]) {
+                console.warn('[AIDA/Auth/DAT] Silent refresh Auth0 error:', errorMatch[1]);
+                return { ok: false, reason: `auth0_${errorMatch[1]}` };
+            }
+
+            return { ok: false, reason: 'no_token_in_response' };
+        } catch (e) {
+            console.warn('[AIDA/Auth/DAT] Silent refresh error:', e.message);
+            return { ok: false, reason: e.message };
+        }
     },
 
     /**
@@ -298,7 +243,7 @@ const AuthDat = {
 
             if (now >= meta.expiresAt) {
                 // Токен протух → блокирующий refresh
-                console.log('[AIDA/Auth/DAT] Token expired, attempting silent refresh');
+
                 const result = await this.silentRefresh();
                 if (result.ok) return result.token;
                 return null;
@@ -333,7 +278,7 @@ const AuthDat = {
      */
     async disconnect() {
         await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
-        console.log('[AIDA/Auth/DAT] Disconnected');
+
     },
 
     // ============================================================

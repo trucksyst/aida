@@ -189,13 +189,13 @@ const AuthTruckstop = {
      * Возвращает: { ok: true, token } или { ok: false, reason }
      */
     async silentRefresh() {
-        console.log('[AIDA/Auth/TS] Step: attempting silent refresh');
+
 
         const data = await chrome.storage.local.get([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
         const currentToken = data[STORAGE_KEYS.token];
 
         if (!currentToken) {
-            console.log('[AIDA/Auth/TS] silentRefresh: no current token');
+
             return { ok: false, reason: 'no_token' };
         }
 
@@ -231,7 +231,7 @@ const AuthTruckstop = {
             // Сохраняем userId из мета (если был)
             const meta = data[STORAGE_KEYS.tokenMeta];
             await this._saveToken(newToken, 'silent_refresh', meta?.userId);
-            console.log('[AIDA/Auth/TS] Step: token refreshed silently');
+
             return { ok: true, token: newToken };
 
         } catch (e) {
@@ -266,7 +266,7 @@ const AuthTruckstop = {
 
             if (now >= meta.expiresAt) {
                 // Токен протух → блокирующий refresh
-                console.log('[AIDA/Auth/TS] Token expired, attempting silent refresh');
+
                 const result = await this.silentRefresh();
                 if (result.ok) return result.token;
                 return null;
@@ -301,7 +301,7 @@ const AuthTruckstop = {
      */
     async disconnect() {
         await chrome.storage.local.remove([STORAGE_KEYS.token, STORAGE_KEYS.tokenMeta]);
-        console.log('[AIDA/Auth/TS] Disconnected');
+
     },
 
     // ============================================================
@@ -329,7 +329,7 @@ const AuthTruckstop = {
     async _fetchV5Token(userId) {
         if (!userId) return null;
         const url = `${TS_AUTH_CONFIG.authServiceUrl}/token/${userId}`;
-        console.log('[AIDA/Auth/TS] Step: fetching v5 token for userId:', userId);
+
 
         const resp = await fetch(url, {
             headers: {
@@ -392,11 +392,6 @@ const AuthTruckstop = {
 
         if (claims && claims.v5AccountId) {
             storageData[STORAGE_KEYS.claims] = claims;
-            console.log('[AIDA/Auth/TS] Claims saved:', {
-                v5AccountId: claims.v5AccountId ? '✓' : '✗',
-                accountUserId: claims.accountUserId ? '✓' : '✗',
-                v5AccountUserId: claims.v5AccountUserId ? '✓' : '✗'
-            });
         }
         // Если claims нет (например, raw Bearer от харвестера) — не перезаписываем ранее сохранённые
         await chrome.storage.local.set(storageData);

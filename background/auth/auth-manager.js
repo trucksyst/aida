@@ -54,7 +54,7 @@ const AuthManager = {
         }
         try {
             const result = await module.login();
-            console.log(`[AIDA/Auth] Step: login(${board}) — ok:${result.ok}`);
+
             return result;
         } catch (e) {
             console.warn(`[AIDA/Auth] login(${board}) failed:`, e.message);
@@ -139,7 +139,7 @@ const AuthManager = {
         } else {
             await chrome.storage.local.remove(`token:${board}`);
         }
-        console.log(`[AIDA/Auth] Disconnected: ${board}`);
+
     },
 
     /**
@@ -195,35 +195,35 @@ const AuthManager = {
         const failed = [];
 
         for (const { board, error } of sorted) {
-            console.log(`[AIDA/Auth] Auto-resolving auth for: ${board} (${error?.code})`);
+
             const module = AUTH_MODULES[board];
 
             // Борды без auth-модуля (Truckstop, TP) — НЕ открываем popup автоматически.
             // Popup для них только при ручном клике юзера на кнопку.
             if (!module) {
-                console.log(`[AIDA/Auth] Skipping ${board} — no auth module (auto-popup disabled)`);
+
                 failed.push(board);
                 continue;
             }
 
             // Шаг 1: silent refresh (если есть auth-модуль)
             if (module && module.silentRefresh) {
-                console.log(`[AIDA/Auth] Trying silent refresh for ${board}...`);
+
                 const refreshResult = await module.silentRefresh();
                 if (refreshResult.ok) {
-                    console.log(`[AIDA/Auth] Silent refresh OK for ${board}`);
+
                     resolved.push(board);
                     continue;
                 }
-                console.log(`[AIDA/Auth] Silent refresh failed for ${board}: ${refreshResult.reason}`);
+
             }
 
             // Шаг 2: popup login через auth-модуль
             try {
-                console.log(`[AIDA/Auth] Opening popup login for ${board}...`);
+
                 const loginResult = await module.login();
                 if (loginResult.ok) {
-                    console.log(`[AIDA/Auth] Popup login OK for ${board}`);
+
                     resolved.push(board);
                     continue;
                 }

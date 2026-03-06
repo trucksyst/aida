@@ -142,7 +142,7 @@ async function search(params) {
 
     await rateLimit();
     const body = buildGraphQLRequest(params, originPlace, destPlace);
-    console.log('[AIDA/DAT] FindLoads criteria:', JSON.stringify(body.variables.criteria, null, 2));
+
 
     const resp = await fetch(GRAPHQL_URL, {
         method: 'POST',
@@ -199,7 +199,7 @@ async function search(params) {
 
     const searchId = root?.searchId || null;
     if (searchId) {
-        console.log('[AIDA/DAT] searchId for SSE:', searchId);
+
         DatAdapter._lastSearchId = searchId;
         DatAdapter._lastSearchToken = token;
     }
@@ -281,7 +281,7 @@ async function getLocationSuggestion(token, lookupTerm) {
         console.warn('[AIDA/DAT] GetLocationSuggestions missing fields:', JSON.stringify(first).slice(0, 200));
         return null;
     }
-    console.log('[AIDA/DAT] GetLocationSuggestions resolved:', term, '→', first.name, 'placeId:', placeId, 'lat:', lat, 'lng:', lng);
+
     return { id: placeId, city: str(first.city), state: str(first.state), latitude: lat, longitude: lng, postalCode: str(first.postalCode) };
 }
 
@@ -616,7 +616,7 @@ async function addToWorklist(load, userStatus) {
 
     const worklistItemId = json?.id || null;
     if (worklistItemId) {
-        console.log('[AIDA/DAT] Worklist added:', postingId, '→', userStatus, 'id:', worklistItemId);
+
     }
     return worklistItemId ? { worklistItemId } : null;
 }
@@ -653,7 +653,7 @@ async function updateWorklistStatus(worklistItemId, userStatus) {
         console.warn('[AIDA/DAT] Worklist PATCH failed:', resp.status);
         return false;
     }
-    console.log('[AIDA/DAT] Worklist updated:', worklistItemId, '→', userStatus || 'reset');
+
     return true;
 }
 
@@ -681,7 +681,7 @@ async function removeFromWorklist(worklistItemId) {
         console.warn('[AIDA/DAT] Worklist DELETE failed:', resp.status);
         return false;
     }
-    console.log('[AIDA/DAT] Worklist removed:', worklistItemId);
+
     return true;
 }
 
@@ -791,7 +791,7 @@ function subscribeLiveQuery(searchId, token, onEvent) {
                             if (eventType && dataStr) {
                                 try {
                                     const data = JSON.parse(dataStr);
-                                    console.log('[AIDA/DAT] SSE event:', eventType);
+
                                     onEvent(eventType, data);
                                 } catch (e) {
                                     console.warn('[AIDA/DAT] SSE: invalid JSON:', dataStr.slice(0, 200));
@@ -811,7 +811,7 @@ function subscribeLiveQuery(searchId, token, onEvent) {
         }
 
         if (!signal.aborted) {
-            console.log('[AIDA/DAT] SSE: stream ended, searchId:', searchId);
+
         }
     })();
 
@@ -865,7 +865,7 @@ const DatAdapter = {
         this._liveQueryNewCount = 0;
         chrome.alarms.create('aida-keepalive', { periodInMinutes: 0.4 });
 
-        console.log('[AIDA/DAT] SSE: starting liveQuery for searchId:', this._lastSearchId);
+
 
         const self = this;
         this._liveQuerySub = subscribeLiveQuery(this._lastSearchId, this._lastSearchToken, (eventType, data) => {
@@ -883,7 +883,7 @@ const DatAdapter = {
             } else if (eventType.includes('DELETED') || eventType.includes('UPDATED')) {
                 self._scheduleLiveRefresh();
             } else if (eventType === 'SEARCH_MAX') {
-                console.log('[AIDA/DAT] SSE: SEARCH_MAX — search limit reached');
+
             }
         });
     },
@@ -911,7 +911,7 @@ const DatAdapter = {
         this._liveQueryRefreshTimer = setTimeout(async () => {
             self._liveQueryRefreshTimer = null;
             if (!self._realtimeParams || self._liveQueryNewCount === 0) return;
-            console.log('[AIDA/DAT] SSE: auto-refreshing after', self._liveQueryNewCount, 'new events');
+
             self._liveQueryNewCount = 0;
             if (self._liveQueryPushTimer) { clearTimeout(self._liveQueryPushTimer); self._liveQueryPushTimer = null; }
             if (self._onRealtimeUpdate) {
@@ -969,7 +969,7 @@ const DatAdapter = {
                 email: profile?.email
             }
         });
-        console.log('[AIDA/DAT] Profile fetched:', profile?.firstName, profile?.lastName);
+
     }
 };
 export default DatAdapter;
