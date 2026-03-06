@@ -577,7 +577,7 @@ async function searchLoads(params) {
     } else if (tsRaw?.error) {
         console.warn('[AIDA/Core] Truckstop adapter returned error:', tsRaw.error);
         adapterWarnings.push('Truckstop: ' + (tsRaw.error.message || tsRaw.error));
-        if (tsRaw.error.code === 'AUTH_REQUIRED' || tsRaw.error.code === 'NO_TEMPLATE' || tsRaw.error.code === 'WRONG_TEMPLATE') {
+        if (tsRaw.error.code === 'AUTH_REQUIRED' || tsRaw.error.code === 'NO_CLAIMS' || tsRaw.error.code === 'NO_TEMPLATE' || tsRaw.error.code === 'WRONG_TEMPLATE') {
             authErrors.push({ board: 'truckstop', error: tsRaw.error });
         }
     }
@@ -780,7 +780,7 @@ async function handleTsAutoRefresh() {
     let result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
 
     // JWT протух → silent refresh → retry
-    if (!result?.ok && result?.error?.code === 'AUTH_REQUIRED') {
+    if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
         console.log('[AIDA/Core] TS auto-refresh: JWT expired, trying silent refresh...');
         const refreshed = await AuthManager.autoResolveAuthErrors([{ board: 'truckstop', error: result.error }]);
         if (refreshed.resolved?.includes('truckstop')) {

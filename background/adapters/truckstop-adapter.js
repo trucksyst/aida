@@ -25,6 +25,37 @@ const TS_EQUIP_MAP = {
     'LANDOLL': 'Landoll', 'MAXI': 'Maxi'
 };
 
+/** Маппинг AIDA equipment → Truckstop equipment_ids (из GetMasterEquipment API).
+ *  Каждый тип — массив всех childId (подтипов), как передаёт сайт truckstop.com. */
+const TS_EQUIP_IDS = {
+    'VAN': [17, 41, 43, 44, 45, 46, 48, 49, 50, 51, 53, 54, 56, 57, 58, 60, 61, 62, 63, 64, 65, 67, 68, 69, 70, 71, 76],
+    'REEFER': [17, 31, 34, 53, 56, 57, 61, 63, 64, 67, 68, 69, 70, 76],
+    'FLATBED': [12, 14, 15, 16, 17, 18, 48, 59, 60, 61, 62, 63, 65, 67, 68, 69, 76, 78],
+    'STEPDECK': [16, 37, 38, 39, 62, 66],
+    'DOUBLEDROP': [9, 64],
+    'LOWBOY': [23],
+    'RGN': [9, 15, 23, 24, 32, 33, 39, 66],
+    'HOPPER': [19],
+    'TANKER': [42],
+    'POWERONLY': [25, 30],
+    'CONTAINER': [8],
+    'DUMP': [10, 79],
+    'AUTOCARRIER': [3],
+    'LANDOLL': [22],
+    'MAXI': [27]
+};
+
+/** Получить строку equipment_ids из params.equipment (Hasura _int4 формат). */
+function getEquipmentIds(params) {
+    if (!params?.equipment) return null;
+    const eqArr = Array.isArray(params.equipment) ? params.equipment : [params.equipment];
+    const allIds = new Set();
+    for (const e of eqArr) {
+        const ids = TS_EQUIP_IDS[e];
+        if (ids) ids.forEach(id => allIds.add(id));
+    }
+    return allIds.size > 0 ? `{${[...allIds].sort((a, b) => a - b).join(',')}}` : null;
+}
 
 /** Полный GraphQL query для built-in поиска (из HAR main.truckstop.com). */
 const BUILTIN_GRAPHQL_QUERY = `query LoadSearchSortByBinRateDesc($args: get_loads_with_extra_data_sort_by_bin_rate_desc_args! = {}, $isPro: Boolean!) {
@@ -264,7 +295,7 @@ function normalizeTruckstopRaw(raw) {
 
     const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? '');
     const pickupDate = originEarly ? originEarly.split('T')[0] : '';
-    const postedAt = str(raw.createdOn ?? raw.updatedOn ?? raw.postedAt ?? '');
+    const postedAt = str(raw.updatedOn ?? raw.createdOn ?? raw.postedAt ?? '');
 
     // Notes: W×H + specialInfo
     const descParts = [];
@@ -416,6 +447,7 @@ const TruckstopAdapter = {
     async _searchBuiltIn(params, token, claims) {
         console.log('[AIDA/Truckstop] Step: using built-in GraphQL (no template)');
 
+
         // Геокодируем origin
         let originLat = null, originLon = null;
         if (params?.origin && (params.origin.city || params.origin.state)) {
@@ -454,7 +486,12 @@ const TruckstopAdapter = {
             d.setDate(d.getDate() + 45);
             args.pickup_date_end = d.toISOString().slice(0, 10);
         }
-        // Примечание: equipment_ids НЕ передаём — Truckstop фильтрует equipment на клиенте
+        // Equipment IDs (подтверждено introspection: equipment_ids: _int4)
+        const eqIds = getEquipmentIds(params);
+        if (eqIds) {
+            args.equipment_ids = eqIds;
+            console.log('[AIDA/Truckstop] Step: equipment_ids =', eqIds);
+        }
 
         const body = JSON.stringify({
             operationName: 'LoadSearchSortByBinRateDesc',
@@ -568,6 +605,9 @@ const TruckstopAdapter = {
             d.setDate(d.getDate() + 45);
             args.pickup_date_end = d.toISOString().slice(0, 10);
         }
+        // Equipment IDs
+        const eqIds = getEquipmentIds(params);
+        if (eqIds) args.equipment_ids = eqIds;
 
         const body = JSON.stringify({
             operationName: 'LoadSearchSortByUpdatedOnDesc',

@@ -564,4 +564,58 @@ aida/
 
 ---
 
+## 18. Отказ от блока Harvesters → автономные адаптеры (уточнение v0.1.x)
+
+**Контекст решения:** При детальном изучении архитектуры авторизации каждого лоадборда (DAT Auth0, Truckstop PingOne, TruckerPath) выявлено, что блок Harvesters (content scripts в MAIN world на вкладках бордов) стал архитектурным рудиментом после появления Auth-модулей (`auth-dat.js`, `auth-truckstop.js`). Более того, харвестеры **создают проблемы**: перезаписывают валидные JWT токены невалидными данными (перехват не-JWT Bearer строк из заголовков), что приводит к ошибкам `invalid-jwt` и вынужденным popup-логинам каждые ~20 минут.
+
+**Решение:** Поэтапный отказ от блока Harvesters. Адаптеры становятся полностью автономными «чёрными ящиками» — Auth-модуль обеспечивает токены, адаптер делает запросы к API, Core получает контрактные данные.
+
+### Принцип автономного адаптера
+
+```
+Core → Adapter.search(params) → { ok, loads[], meta }
+         ↑
+    AuthManager.getToken(board) → токен (с авто-refresh до истечения)
+```
+
+- Адаптер сам берёт токен через AuthManager
+- AuthManager поддерживает сессию через silent refresh (API call или скрытый таб)
+- **Открытая вкладка борда НЕ нужна** — это подтверждает принцип §4.1
+- UI нужен только для первого логина (popup)
+- Для OpenClaw / внешних API — полностью автономная работа без UI
+
+### Фазы отказа от Harvesters
+
+| Фаза | Борд | Действие | Статус |
+|------|------|----------|--------|
+| 1 | Truckstop | Отключить `harvester-truckstop.js`, добавить проактивный refresh (alarm 15 мин), валидацию JWT | В работе |
+| 2 | DAT | Переписать `silentRefresh()` без зависимости от харвестера, отключить `harvester-dat.js` | Запланировано |
+| 3 | TruckerPath | Написать `auth-truckerpath.js`, сделать адаптер автономным, отключить `harvester-truckerpath.js` | Запланировано |
+
+### Обновление структуры проекта (после всех фаз)
+
+```
+aida/
+├── manifest.json              ← без content_scripts для бордов
+├── background/
+│   ├── background.js          ← Core (без обработки harvester messages)
+│   ├── storage.js
+│   ├── auth/
+│   │   ├── auth-manager.js    ← Единый вход для авторизации
+│   │   ├── auth-dat.js        ← Auth0 (login + silent refresh без харвестера)
+│   │   ├── auth-truckstop.js  ← PingOne (login + API /auth/renew)
+│   │   └── auth-truckerpath.js ← TODO
+│   └── adapters/
+│       ├── dat-adapter.js     ← Автономный
+│       ├── truckstop-adapter.js ← Автономный
+│       └── truckerpath-adapter.js
+└── ui/
+```
+
+> **Примечание:** Раздел 4 (Harvesters) остаётся в ТЗ как историческая справка. Новый код НЕ должен использовать харвестеры для получения токенов или данных поиска. Auth-модули и адаптеры — единственный путь.
+
+> **Подробный план:** см. `docs/PLAN_harvester_removal.md`
+
+---
+
 *Источник: Aida_v01_TZ.docx · внесено в проект в виде docs/AIDA_v01_TZ.md*
