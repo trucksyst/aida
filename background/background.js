@@ -805,13 +805,13 @@ function stopLiveQuery() {
 // ============================================================
 
 const TS_REFRESH_ALARM = 'aida-ts-refresh';
-const TS_REFRESH_INTERVAL_MIN = 1; // каждую минуту
+const TS_REFRESH_INTERVAL_MIN = 0.5; // каждые 30 сек — как на сайте Truckstop
 let _tsRefreshParams = null;
 
 function startTsAutoRefresh(searchParams) {
     _tsRefreshParams = searchParams;
     chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
-    console.log('[AIDA/Core] Truckstop auto-refresh started (every 2 min)');
+    console.log('[AIDA/Core] Truckstop auto-refresh started (every 30s)');
 }
 
 function stopTsAutoRefresh() {
