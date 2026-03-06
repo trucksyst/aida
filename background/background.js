@@ -294,8 +294,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 disabledBoards[board] = !wasDisabled; // flip
                 await Storage.saveSettings({ disabledBoards });
 
-                // При ВЫКЛЮЧЕНИИ — удаляем все грузы этого борда
+                // При ВЫКЛЮЧЕНИИ — остановить realtime + удалить грузы
                 if (!wasDisabled) {
+                    const adapter = ADAPTERS[board]?.module;
+                    if (adapter?.stopRealtime) adapter.stopRealtime();
+                    if (adapter?._stopSSE) adapter._stopSSE();
+                    if (adapter?._stopPolling) adapter._stopPolling();
+
                     const loads = await Storage.getLoads();
                     const filtered = loads.filter(l => l.board !== board);
                     await Storage.setLoads(filtered);

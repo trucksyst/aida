@@ -683,10 +683,10 @@ const TruckstopAdapter = {
     // ─── Внутренние методы polling (не публичные) ─────────────
 
     _startPolling() {
-        this._stopPolling();
+        // Только пересоздаём alarm — НЕ трогаем _realtimeParams
+        chrome.alarms.clear(TS_REFRESH_ALARM).catch(() => { });
         chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
         console.log('[AIDA/Truckstop] Realtime polling started (alarm every', TS_REFRESH_INTERVAL_MIN * 60, 'sec)');
-
     },
 
     _stopPolling() {
