@@ -345,11 +345,33 @@ const AuthTruckstop = {
     },
 
     /**
+     * Проверить, является ли строка валидным JWT (3 части через точку, payload декодируется).
+     */
+    _isValidJwt(token) {
+        if (!token || typeof token !== 'string') return false;
+        const parts = token.split('.');
+        if (parts.length !== 3) return false;
+        try {
+            // Проверяем что payload декодируется
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return payload && typeof payload === 'object';
+        } catch {
+            return false;
+        }
+    },
+
+    /**
      * Сохранить токен + мета-данные в Storage.
-     * Пишет в тот же ключ `token:truckstop`, что и харвестер — совместимость 100%.
+     * Валидирует что токен — реальный JWT (3 части, payload декодируется).
      * Также извлекает claims для GraphQL запросов (JWT decode → introspection fallback).
      */
     async _saveToken(token, source, userId) {
+        // Валидация: не сохраняем мусор
+        if (!this._isValidJwt(token)) {
+            console.warn('[AIDA/Auth/TS] _saveToken REJECTED: not a valid JWT (source:', source, ')');
+            return;
+        }
+
         const now = Date.now();
         const meta = {
             issuedAt: now,

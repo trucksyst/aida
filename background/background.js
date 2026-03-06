@@ -190,17 +190,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: true });
             break;
 
-        // TS_SEARCH_RESPONSE отключён — адаптер работает автономно (built-in GraphQL).
-        // Грузы с открытого сайта Truckstop больше не пропихиваются в AIDA.
-        // case 'TS_SEARCH_RESPONSE':
-        //     handleTruckstopSearchResponse(message.results, message.token).catch(console.error);
-        //     sendResponse({ ok: true });
-        //     break;
-
-        case 'TS_SEARCH_REQUEST_CAPTURED':
-            handleTruckstopRequestCaptured(message).catch(console.error);
-            sendResponse({ ok: true });
-            break;
+        // Truckstop harvester отключён (§18 ТЗ) — адаптер полностью автономный.
+        // TS_SEARCH_RESPONSE, TS_SEARCH_REQUEST_CAPTURED больше не обрабатываются.
+        // Auth-модуль (auth-truckstop.js) управляет токенами, адаптер делает GraphQL запросы.
 
         case 'TP_SEARCH_RESPONSE':
             handleTruckerpathSearchResponse(message.results, message.sourceUrl).catch(console.error);
@@ -382,6 +374,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleTokenHarvested({ board, token }) {
     if (!token) return;
+
+    // Truckstop harvester отключён (§18 ТЗ) — токены только через auth-truckstop.js
+    if (board === 'truckstop') {
+        console.log('[AIDA/Core] TOKEN_HARVESTED for truckstop ignored — adapter is autonomous');
+        return;
+    }
+
     const existing = await Storage.getToken(board);
     if (existing === token) return;
 
@@ -1081,6 +1080,9 @@ chrome.tabs.onRemoved.addListener(async () => {
 // ============================================================
 
 chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
+// Проактивный refresh JWT Truckstop — каждые 15 мин ДО истечения токена.
+// Устраняет необходимость popup-логина (§18 ТЗ).
+chrome.alarms.create('aida-ts-proactive-refresh', { periodInMinutes: 15 });
 // Keep-alive для SSE создаётся динамически в startLiveQuery() / stopLiveQuery()
 
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -1089,6 +1091,25 @@ chrome.alarms.onAlarm.addListener(alarm => {
     }
     if (alarm.name === TS_REFRESH_ALARM) {
         handleTsAutoRefresh().catch(e => console.warn('[AIDA/Core] TS auto-refresh error:', e.message));
+    }
+    if (alarm.name === 'aida-ts-proactive-refresh') {
+        // Проактивно обновляем JWT Truckstop пока он ещё валидный
+        (async () => {
+            try {
+                const status = await AuthManager.getStatus('truckstop');
+                if (status === 'disconnected') return; // не залогинен — не нужно
+                console.log('[AIDA/Core] Proactive TS token refresh...');
+                const result = await AuthManager.silentRefresh('truckstop');
+                if (result?.ok) {
+                    console.log('[AIDA/Core] Proactive TS refresh OK');
+                    await pushToUI({ settings: await getSettingsForUI() });
+                } else {
+                    console.log('[AIDA/Core] Proactive TS refresh skipped:', result?.reason || 'no result');
+                }
+            } catch (e) {
+                console.warn('[AIDA/Core] Proactive TS refresh error:', e.message);
+            }
+        })();
     }
     // keep-alive: просто пробуждает SW; SSE fetch stream продолжит работу
 });
