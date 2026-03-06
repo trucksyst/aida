@@ -676,6 +676,7 @@ const TruckstopAdapter = {
     _startPolling() {
         this._stopPolling();
         chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
+        console.log('[AIDA/Truckstop] Realtime polling started (alarm every', TS_REFRESH_INTERVAL_MIN * 60, 'sec)');
 
     },
 
@@ -689,8 +690,11 @@ const TruckstopAdapter = {
      * Делает refreshNew() и вызывает callback с новыми грузами.
      */
     async handleAlarm() {
-        if (!this._realtimeParams) return;
-
+        if (!this._realtimeParams) {
+            console.log('[AIDA/Truckstop] handleAlarm: no realtimeParams, skipping');
+            return;
+        }
+        console.log('[AIDA/Truckstop] handleAlarm: refreshing...');
         let result = await this.refreshNew(this._realtimeParams);
 
         // JWT протух → silent refresh → retry
@@ -702,7 +706,11 @@ const TruckstopAdapter = {
             }
         }
 
-        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
+        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) {
+            console.log('[AIDA/Truckstop] handleAlarm: no new loads, ok:', result?.ok, 'loads:', result?.loads?.length || 0);
+            return;
+        }
+        console.log('[AIDA/Truckstop] handleAlarm: got', result.loads.length, 'loads, pushing to UI');
 
         // Вызываем callback — Core решит что делать с новыми грузами
         if (this._onRealtimeUpdate) {
