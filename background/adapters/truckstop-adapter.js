@@ -1,11 +1,14 @@
 /**
- * AIDA v0.1 — Truckstop Adapter
- * Нормализация перехваченных с страницы Truckstop данных в единый формат AIDA.
- * Поиск: через сохранённый шаблон (TS_SEARCH_REQUEST_CAPTURED) + fetch из background.
+ * AIDA v0.1 — Truckstop Adapter (Autonomous Plugin)
  *
- * Поля сырой карточки: открыть в консоли лог "[AIDA/Core] Truckstop raw load card",
- * развернуть объект и подставить нужные имена ключей ниже (RAW_FIELD_*).
+ * Полностью автономный адаптер — чёрный ящик.
+ * Сам берёт токен через AuthManager, сам управляет auto-refresh и пагинацией.
+ * Core не знает деталей — только вызывает единый контракт:
+ *   search(params), startRealtime(params, onUpdate), stopRealtime(),
+ *   loadMore(), getStatus(), login(), disconnect(), handleAlarm()
  */
+import AuthManager from '../auth/auth-manager.js';
+
 const BOARD = 'truckstop';
 
 /** Ключ описания груза (COMMENTS) в сырой карточке — взять из консоли, не угадывать. */
@@ -358,28 +361,56 @@ function normalizeTruckstopResults(rawList) {
     return out;
 }
 
+// ============================================================
+// Auto-refresh & Pagination state
+// ============================================================
+
+const TS_REFRESH_ALARM = 'aida-ts-refresh';
+const TS_REFRESH_INTERVAL_MIN = 0.5; // каждые 30 сек — как на сайте Truckstop
+const TS_PAGE_SIZE = 100;
+
 const TruckstopAdapter = {
-    async search(params, ctx = {}) {
+    // Internal state
+    _realtimeParams: null,
+    _onUpdate: null,
+    _lastParams: null,
+    _offset: 0,
+
+    // ---- Autonomous Auth helpers ----
+
+    /** Получить JWT claims из storage (v5AccountId etc.) */
+    async _getClaims() {
+        const data = await chrome.storage.local.get('auth:truckstop:claims');
+        return data['auth:truckstop:claims'] || null;
+    },
+
+    /** Получить token + claims, вернуть { token, claims } или null если нет. */
+    async _getAuth() {
+        const token = await AuthManager.getToken(BOARD);
+        if (!token) return null;
+        const claims = await this._getClaims();
+        if (!claims || !claims.v5AccountId) return null;
+        return { token, claims };
+    },
+
+    // ---- Unified Contract ----
+
+    async search(params) {
         console.log('[AIDA/Truckstop] Step: search called, params=', JSON.stringify(params || {}).slice(0, 120));
-        const token = ctx.token;
-        const claims = ctx.claims;  // { v5AccountId, accountUserId, v5AccountUserId } из JWT
 
-        if (!token) {
+        const auth = await this._getAuth();
+        if (!auth) {
             return {
                 ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'AUTH_REQUIRED', message: 'Truckstop token is missing', retriable: true }
+                error: { code: 'AUTH_REQUIRED', message: 'Truckstop token/claims missing', retriable: true }
             };
         }
 
-        // Built-in GraphQL — нужны claims из JWT
-        if (!claims || !claims.v5AccountId) {
-            return {
-                ok: false, loads: [], meta: { board: BOARD },
-                error: { code: 'NO_CLAIMS', message: 'Missing JWT claims. Re-login to Truckstop.', retriable: true }
-            };
-        }
+        // Сброс пагинации при новом поиске
+        this._offset = 0;
+        this._lastParams = params;
 
-        return this._searchBuiltIn(params, token, claims);
+        return this._searchBuiltIn(params, auth.token, auth.claims);
     },
 
     /**
@@ -569,13 +600,15 @@ const TruckstopAdapter = {
     /**
      * Auto-refresh: получить самые свежие грузы (sorted by updatedOn desc).
      * Возвращает { ok, loads, meta } — только НОВЫЕ грузы (limit=20).
-     * Вызывается из background по таймеру.
+     * Полностью автономный — сам берёт token/claims.
      */
-    async refreshNew(params, ctx = {}) {
-        const token = ctx.token;
-        const claims = ctx.claims;
-        if (!token || !claims || !claims.v5AccountId) {
-            return { ok: false, loads: [], meta: { board: BOARD } };
+    async refreshNew(params) {
+        const auth = await this._getAuth();
+        if (!auth) {
+            return {
+                ok: false, loads: [], meta: { board: BOARD },
+                error: { code: 'AUTH_REQUIRED', message: 'Truckstop token/claims missing', retriable: true }
+            };
         }
 
         // Геокодируем origin
@@ -594,9 +627,9 @@ const TruckstopAdapter = {
             origin_radius: Number(params.radius) || 125,
             pickup_date_begin: params.dateFrom ? String(params.dateFrom).slice(0, 10) : new Date().toISOString().slice(0, 10),
             pickup_date_end: params.dateTo ? String(params.dateTo).slice(0, 10) : null,
-            carrier_id: claims.v5AccountId,
-            gl_carrier_user_id: claims.accountUserId,
-            account_user_id: claims.v5AccountUserId,
+            carrier_id: auth.claims.v5AccountId,
+            gl_carrier_user_id: auth.claims.accountUserId,
+            account_user_id: auth.claims.v5AccountUserId,
             enable_pinned_loads: true,
             enable_floating_loads: true,
             show_empty_minimum_authority_days_required: null,
@@ -622,12 +655,110 @@ const TruckstopAdapter = {
         const headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json, text/plain, */*',
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${auth.token}`,
             'Origin': 'https://main.truckstop.com',
             'Referer': 'https://main.truckstop.com/'
         };
 
         return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
+    },
+
+    // ============================================================
+    // Realtime (auto-refresh via alarm) — полностью внутри адаптера
+    // ============================================================
+
+    /**
+     * Запустить auto-refresh polling.
+     * @param {object} params — параметры поиска
+     * @param {function} onUpdate — callback(newLoads[]) при появлении новых грузов
+     */
+    startRealtime(params, onUpdate) {
+        this._realtimeParams = params;
+        this._onUpdate = onUpdate;
+        chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
+        console.log('[AIDA/Truckstop] auto-refresh started (every 30s)');
+    },
+
+    stopRealtime() {
+        this._realtimeParams = null;
+        this._onUpdate = null;
+        chrome.alarms.clear(TS_REFRESH_ALARM).catch(() => { });
+    },
+
+    /**
+     * Обработчик alarm — вызывается из Core alarm router.
+     * Делает refreshNew() и вызывает onUpdate callback с новыми грузами.
+     */
+    async handleAlarm() {
+        if (!this._realtimeParams) return;
+
+        let result = await this.refreshNew(this._realtimeParams);
+
+        // JWT протух → silent refresh → retry
+        if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
+            console.log('[AIDA/Truckstop] auto-refresh: JWT expired, trying silent refresh...');
+            const refreshed = await AuthManager.autoResolveAuthErrors([{ board: BOARD, error: result.error }]);
+            if (refreshed.resolved?.includes(BOARD)) {
+                result = await this.refreshNew(this._realtimeParams);
+            }
+        }
+
+        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
+
+        // Вызываем callback — Core решит что делать с новыми грузами
+        if (this._onUpdate) {
+            this._onUpdate(result.loads);
+        }
+    },
+
+    // ============================================================
+    // Pagination (loadMore) — полностью внутри адаптера
+    // ============================================================
+
+    async loadMore() {
+        if (!this._lastParams) {
+            return { ok: false, error: 'No active search', loads: [] };
+        }
+
+        const auth = await this._getAuth();
+        if (!auth) {
+            return { ok: false, error: 'Truckstop not connected', loads: [] };
+        }
+
+        this._offset += TS_PAGE_SIZE;
+        console.log(`[AIDA/Truckstop] loadMore: offset=${this._offset}`);
+
+        const paramsWithOffset = { ...this._lastParams, offset: this._offset };
+        const result = await this._searchBuiltIn(paramsWithOffset, auth.token, auth.claims);
+
+        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) {
+            return { ok: true, loads: [], added: 0, hasMore: false };
+        }
+
+        return { ok: true, loads: result.loads, added: result.loads.length, hasMore: result.loads.length >= TS_PAGE_SIZE };
+    },
+
+    // ============================================================
+    // Status / Login / Disconnect — прокси к AuthManager
+    // ============================================================
+
+    async getStatus() {
+        const status = await AuthManager.getStatus(BOARD);
+        return {
+            connected: status === 'connected',
+            status,
+            hasToken: status !== 'disconnected',
+            hasAuthModule: true
+        };
+    },
+
+    async login() {
+        return AuthManager.login(BOARD);
+    },
+
+    async disconnect() {
+        this.stopRealtime();
+        return AuthManager.disconnect(BOARD);
     }
 };
 

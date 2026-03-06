@@ -40,10 +40,6 @@ console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14
 const SEARCH_COOLDOWN_MS = 10_000;
 let _searchCooldownUntil = 0;
 
-/** Truckstop pagination: текущий offset для infinite scroll */
-let _tsOffset = 0;
-const TS_PAGE_SIZE = 100;
-
 /** Мерж: заменяем только грузы конкретного борда, остальные сохраняем. */
 function mergeLoadsByBoard(existing, newLoads, board) {
     const other = (existing || []).filter(l => l.board !== board);
@@ -536,20 +532,13 @@ async function searchLoads(params) {
     if (!params) throw new Error('No search params');
 
     // Токены через AuthManager (§18 ТЗ: агрессивный refresh at every use)
-    const tsToken = await AuthManager.getToken('truckstop');
     const settings = await Storage.getSettings();
-    const tsTemplate = settings?.truckstopRequestTemplate || null;
     const tpTemplate = settings?.truckerpathRequestTemplate || null;
     const existing = await Storage.getLoads();
     const tpCached = (existing || []).filter(l => l.board === 'tp' && l.status === 'active');
     const disabled = settings.disabledBoards || {};
-    // JWT claims для Truckstop built-in GraphQL
-    const tsClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
 
     // Отключённые борды и борды без настройки не участвуют в поиске.
-    // DAT — всегда запускается (у него есть auth-модуль с auto-login).
-    // Truckstop — только если есть токен (AuthManager.getToken проверяет + refresh).
-    // TruckerPath — только если есть шаблон (template).
     const skipResult = { ok: true, loads: [], meta: { skipped: true } };
     const skipDat = !!disabled.dat;
     const skipTs = !!disabled.truckstop;
@@ -557,7 +546,7 @@ async function searchLoads(params) {
 
     const [datResult, tsResult, tpResult] = await Promise.allSettled([
         skipDat ? Promise.resolve(skipResult) : DatAdapter.search(params),
-        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params, { token: tsToken, claims: tsClaims }),
+        skipTs ? Promise.resolve(skipResult) : TruckstopAdapter.search(params),
         skipTp ? Promise.resolve(skipResult) : TruckerpathAdapter.search(params, { cachedLoads: tpCached, template: tpTemplate })
     ]);
 
@@ -627,9 +616,7 @@ async function searchLoads(params) {
                         if (idx !== -1) adapterWarnings.splice(idx, 1);
                     }
                     if (board === 'truckstop' && !disabled.truckstop) {
-                        const freshTsToken = await Storage.getToken('truckstop');
-                        const freshClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
-                        const retryResult = await TruckstopAdapter.search(params, { token: freshTsToken, claims: freshClaims });
+                        const retryResult = await TruckstopAdapter.search(params);
                         tsLoads = retryResult?.loads || [];
                         const idx = adapterWarnings.findIndex(w => w.startsWith('Truckstop:'));
                         if (idx !== -1) adapterWarnings.splice(idx, 1);
@@ -656,7 +643,6 @@ async function searchLoads(params) {
     await Storage.clearActive();
     await Storage.setLoads(loads);
     _searchCooldownUntil = Date.now() + SEARCH_COOLDOWN_MS;
-    _tsOffset = 0; // сброс пагинации при новом поиске
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
 
@@ -667,11 +653,11 @@ async function searchLoads(params) {
         startLiveQuery(datSearchId, datSseToken, params);
     }
 
-    // Truckstop auto-refresh: запуск alarm если TS включён
+    // Truckstop auto-refresh: адаптер сам управляет alarm
     if (!skipTs) {
-        startTsAutoRefresh(params);
+        TruckstopAdapter.startRealtime(params, (newLoads) => handleTsRealtimeUpdate(newLoads));
     } else {
-        stopTsAutoRefresh();
+        TruckstopAdapter.stopRealtime();
     }
 
     // Возвращаем loads и warnings для UI
@@ -679,26 +665,12 @@ async function searchLoads(params) {
 }
 
 // ============================================================
-// loadMoreLoads — infinite scroll (пагинация Truckstop)
+// loadMoreLoads — infinite scroll (пагинация через адаптер)
 // ============================================================
 
 async function loadMoreLoads() {
-    const settings = await Storage.getSettings();
-    const lastSearch = settings?.lastSearch;
-    if (!lastSearch) return { ok: false, error: 'No active search' };
-
-    _tsOffset += TS_PAGE_SIZE;
-    console.log(`[AIDA/Core] LOAD_MORE: offset=${_tsOffset}`);
-
-    const tsToken = await AuthManager.getToken('truckstop');
-    const tsClaims = (await chrome.storage.local.get('auth:truckstop:claims'))['auth:truckstop:claims'] || null;
-
-    if (!tsToken || !tsClaims) {
-        return { ok: false, error: 'Truckstop not connected' };
-    }
-
-    const paramsWithOffset = { ...lastSearch, offset: _tsOffset };
-    const result = await TruckstopAdapter.search(paramsWithOffset, { token: tsToken, claims: tsClaims });
+    // Адаптер сам управляет offset и берёт токен
+    const result = await TruckstopAdapter.loadMore();
 
     if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) {
         console.log('[AIDA/Core] LOAD_MORE: no more loads');
@@ -719,7 +691,7 @@ async function loadMoreLoads() {
     await pushToUI({ loads: merged });
 
     console.log(`[AIDA/Core] LOAD_MORE: +${newLoads.length} loads (total: ${merged.length})`);
-    return { ok: true, added: newLoads.length, hasMore: result.loads.length >= TS_PAGE_SIZE };
+    return { ok: true, added: newLoads.length, hasMore: result.hasMore };
 }
 
 // ============================================================
@@ -801,57 +773,17 @@ function stopLiveQuery() {
 }
 
 // ============================================================
-// Truckstop Auto-Refresh — polling новых грузов каждые 2 мин
+// Truckstop Realtime Update callback
 // ============================================================
 
-const TS_REFRESH_ALARM = 'aida-ts-refresh';
-const TS_REFRESH_INTERVAL_MIN = 0.5; // каждые 30 сек — как на сайте Truckstop
-let _tsRefreshParams = null;
-
-function startTsAutoRefresh(searchParams) {
-    _tsRefreshParams = searchParams;
-    chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
-    console.log('[AIDA/Core] Truckstop auto-refresh started (every 30s)');
-}
-
-function stopTsAutoRefresh() {
-    _tsRefreshParams = null;
-    chrome.alarms.clear(TS_REFRESH_ALARM).catch(() => { });
-}
-
-async function handleTsAutoRefresh() {
-    if (!_tsRefreshParams) return;
-    const settings = await Storage.getSettings();
-    if (settings.disabledBoards?.truckstop) {
-        stopTsAutoRefresh();
-        return;
-    }
-
-    // Токен через AuthManager — агрессивный refresh (§18 ТЗ)
-    const tsToken = await AuthManager.getToken('truckstop');
-    const claims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
-    if (!tsToken || !claims) return;
-
-    // auto-refresh fetch — не логируем каждый цикл
-    let result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: tsToken, claims });
-
-    // JWT протух → silent refresh → retry
-    if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
-        console.log('[AIDA/Core] TS auto-refresh: JWT expired, trying silent refresh...');
-        const refreshed = await AuthManager.autoResolveAuthErrors([{ board: 'truckstop', error: result.error }]);
-        if (refreshed.resolved?.includes('truckstop')) {
-            const freshToken = await Storage.getToken('truckstop');
-            const freshClaims = await chrome.storage.local.get('auth:truckstop:claims').then(r => r['auth:truckstop:claims']);
-            result = await TruckstopAdapter.refreshNew(_tsRefreshParams, { token: freshToken, claims: freshClaims });
-        }
-    }
-
-    if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
+/** Callback для TruckstopAdapter.startRealtime() — обрабатывает новые грузы от auto-refresh. */
+async function handleTsRealtimeUpdate(newTsLoads) {
+    if (!Array.isArray(newTsLoads) || newTsLoads.length === 0) return;
 
     // Сравниваем по ID — добавляем только новые
     const existing = await Storage.getLoads();
     const existingIds = new Set(existing.map(l => l.id));
-    const newLoads = result.loads.filter(l => !existingIds.has(l.id));
+    const newLoads = newTsLoads.filter(l => !existingIds.has(l.id));
 
     if (newLoads.length === 0) return;
 
@@ -1147,8 +1079,9 @@ chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-cleanup') {
         Storage.pruneHistory().catch(console.warn);
     }
-    if (alarm.name === TS_REFRESH_ALARM) {
-        handleTsAutoRefresh().catch(e => console.warn('[AIDA/Core] TS auto-refresh error:', e.message));
+    // Truckstop auto-refresh → адаптер сам обрабатывает
+    if (alarm.name === 'aida-ts-refresh') {
+        TruckstopAdapter.handleAlarm().catch(e => console.warn('[AIDA/Core] TS auto-refresh error:', e.message));
     }
     if (alarm.name === 'aida-ts-proactive-refresh') {
         // Проактивно обновляем JWT Truckstop пока он ещё валидный
