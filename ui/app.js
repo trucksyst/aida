@@ -81,9 +81,6 @@ async function init() {
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
     if (resp?.settings?.lastSearch) {
         applyLastSearch(resp.settings.lastSearch);
-        // Даты всегда перебиваем на сегодня
-        document.getElementById('date-from').value = today;
-        document.getElementById('date-to').value = today;
         console.log('[AIDA/UI] Step: applied last search (origin, destination, equipment)');
     }
 
