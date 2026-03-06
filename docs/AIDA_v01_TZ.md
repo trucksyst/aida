@@ -164,13 +164,116 @@ background/auth/
 
 ---
 
-## 5. Adapters — Переводчики Бордов
+## 5. Adapters — Автономные Плагины
 
-**Контракт данных — максимальное объединение полей всех бордов.** Каждый адаптер извлекает **ВСЕ** доступные данные из raw-ответа своего борда и маппит их в единый максимальный формат. Поля, отсутствующие у конкретного борда, остаются пустыми (`''`, `null`, `0`). UI выбирает из контракта нужные поля для отображения. Контракт не привязан к стандарту конкретного борда — это **супер-набор всех полей всех бордов**.
+**Каждый адаптер — полностью автономный чёрный ящик (плагин).**
+Core (`background.js`) не знает деталей ни одного борда. Подключил адаптер — работает. Отключил — не существует.
 
-Принцип: **берём всё → нормализуем в единый формат → UI показывает что нужно.** Если понадобилось новое поле — оно уже в данных, достаточно показать в UI. Не нужно каждый раз лезть в адаптер и парсер.
+Адаптер сам:
+- Берёт токен / template из Storage / AuthManager
+- Делает запрос к API борда (GraphQL, REST, SSE)
+- Нормализует ответ в единый формат
+- Управляет своей авторизацией, пагинацией, realtime-подпиской
 
-Адаптер берёт токен из Storage, формирует запрос к API борда (GraphQL для DAT, REST для Truckstop и т.д.) и возвращает результат в едином формате.
+Добавление нового борда = **1 файл адаптера** + **1 строка в `ADAPTERS` registry** в `background.js`.
+
+### 5.1 Единый контракт адаптера
+
+```js
+const Adapter = {
+    // ─── Основные методы ─────────────────────────────────────
+
+    /**
+     * Поиск грузов по параметрам.
+     * Адаптер сам берёт токен, делает запрос к API, нормализует ответ.
+     * @param {object} params - { origin, destination, equipment, radius, dateFrom, dateTo }
+     * @returns {{ ok: boolean, loads: Load[], meta?: object, error?: { code, message } }}
+     */
+    async search(params),
+
+    /**
+     * Подписка на новые грузы в реальном времени (опционально).
+     * DAT: SSE-поток от API, слушает events CREATED/UPDATED/DELETED.
+     * Truckstop: alarm-based polling каждые 30 сек.
+     * Вызывает onUpdate(event) при появлении новых грузов.
+     * @param {object} params - параметры поиска (для refresh)
+     * @param {function} onUpdate - callback: (event) => void
+     *   DAT event:  { type: 'newCount', newLoadsCount } или { type: 'refresh', params }
+     *   TS event:   loads[] (массив новых грузов)
+     */
+    startRealtime(params, onUpdate),
+
+    /** Остановить realtime-подписку, очистить таймеры и алармы. */
+    stopRealtime(),
+
+    /**
+     * Дозагрузка (infinite scroll / пагинация).
+     * Подгружает следующую страницу результатов — offset увеличивается внутри адаптера.
+     * Сейчас реализовано только в Truckstop (GraphQL поддерживает offset).
+     * @returns {{ ok: boolean, loads: Load[], hasMore: boolean }}
+     */
+    async loadMore(),
+
+    // ─── Авторизация ─────────────────────────────────────────
+
+    /**
+     * Статус подключения к борду.
+     * DAT/TS: проверяет токен через AuthManager (с авто-refresh).
+     * TP: проверяет наличие сохранённого template.
+     * @returns {{ connected: boolean, status: string, hasToken: boolean, hasAuthModule: boolean }}
+     */
+    async getStatus(),
+
+    /**
+     * Логин на борд.
+     * DAT: popup → Auth0 flow → callback с токеном.
+     * TS: popup → truckstop.com login → cookie extraction.
+     * TP: нет auth-модуля — возвращает инструкцию залогиниться на вкладке.
+     */
+    async login(),
+
+    /** Отключение от борда: очистка токена/template, остановка realtime. */
+    async disconnect(),
+
+    // ─── Harvester handlers (если нужны) ─────────────────────
+
+    /**
+     * Обработка перехваченных грузов от content script (только TP).
+     * @param {array} rawResults - сырые данные грузов
+     * @param {string} sourceUrl - URL откуда перехвачено
+     */
+    async handleSearchResponse(rawResults, sourceUrl),
+
+    /**
+     * Обработка перехваченного запроса → сохранение как template (только TP).
+     * @param {object} msg - { url, method, headers, body }
+     */
+    async handleRequestCaptured(msg),
+
+    // ─── Специфичные (опционально) ───────────────────────────
+
+    /** Загрузить профиль пользователя с борда (только DAT). */
+    async fetchProfile(),
+};
+```
+
+### 5.2 Adapter Registry
+
+```js
+// background.js — единственное место регистрации
+const ADAPTERS = {
+    dat:       { module: DatAdapter,         displayName: 'DAT',         hasAuthModule: true  },
+    truckstop: { module: TruckstopAdapter,   displayName: 'Truckstop',   hasAuthModule: true  },
+    tp:        { module: TruckerpathAdapter,  displayName: 'TruckerPath', hasAuthModule: false },
+};
+```
+
+Core вызывает методы через registry: `ADAPTERS[board].module.search(params)`.
+Ни одного `if (board === 'dat')` в `background.js`.
+
+### 5.3 Контракт данных — единый формат карточки груза
+
+**Контракт данных — максимальное объединение полей всех бордов.** Каждый адаптер извлекает **ВСЕ** доступные данные из raw-ответа своего борда и маппит их в единый максимальный формат. Поля, отсутствующие у конкретного борда, остаются пустыми (`''`, `null`, `0`). UI выбирает из контракта нужные поля для отображения.
 
 ### Единый формат карточки груза (финальный контракт v2)
 

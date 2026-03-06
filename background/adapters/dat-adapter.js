@@ -964,35 +964,6 @@ const DatAdapter = {
             }
         });
         console.log('[AIDA/DAT] Profile fetched:', profile?.firstName, profile?.lastName);
-    },
-
-    // ============================================================
-    // Lifecycle hooks — вызываются Core при действиях с грузами
-    // ============================================================
-
-    /** При сохранении в закладки → добавить/обновить в My Loads (SAVED). */
-    async onBookmark(load) {
-        if (load.worklistItemId) {
-            await updateWorklistStatus(load.worklistItemId, 'SAVED');
-        } else {
-            const result = await addToWorklist(load, 'SAVED');
-            return result; // { worklistItemId }
-        }
-    },
-
-    /** При удалении из закладок → удалить из My Loads. */
-    async onUnbookmark(load) {
-        if (load.worklistItemId) {
-            await removeFromWorklist(load.worklistItemId);
-        }
-    },
-
-    /** При звонке брокеру → добавить в My Loads (CALLED). */
-    async onCall(load) {
-        if (!load.worklistItemId) {
-            const result = await addToWorklist(load, 'CALLED');
-            return result; // { worklistItemId }
-        }
     }
 };
 export default DatAdapter;

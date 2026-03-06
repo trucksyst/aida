@@ -553,19 +553,6 @@ async function saveBookmark(loadId) {
     const load = loads.find(l => l.id === loadId);
     if (!load) return { error: 'Load not found' };
 
-    // Lifecycle hook: адаптер сам решает что делать при bookmark
-    const adapter = ADAPTERS[load.board]?.module;
-    if (adapter?.onBookmark) {
-        try {
-            const result = await adapter.onBookmark(load);
-            if (result?.worklistItemId) {
-                await Storage.setLoadWorklistId(loadId, result.worklistItemId);
-            }
-        } catch (e) {
-            console.warn(`[AIDA/Core] ${load.board} onBookmark failed:`, e.message);
-        }
-    }
-
     await Storage.updateLoadStatus(loadId, 'saved');
     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
     console.log('[AIDA/Core] Step: saveBookmark done → pushToUI(loads, bookmarks)');
@@ -573,23 +560,10 @@ async function saveBookmark(loadId) {
 }
 
 // ============================================================
-// removeBookmark (снять с закладки + при необходимости с My Loads на DAT)
+// removeBookmark
 // ============================================================
 
 async function removeBookmark(loadId) {
-    const bookmarks = await Storage.getBookmarks();
-    const load = bookmarks.find(b => b.id === loadId);
-
-    // Lifecycle hook: адаптер сам решает что делать при unbookmark
-    const adapter = load?.board ? ADAPTERS[load.board]?.module : null;
-    if (adapter?.onUnbookmark) {
-        try {
-            await adapter.onUnbookmark(load);
-        } catch (e) {
-            console.warn(`[AIDA/Core] ${load.board} onUnbookmark failed:`, e.message);
-        }
-    }
-
     await Storage.removeBookmark(loadId);
     await pushToUI({ loads: await Storage.getLoads(), bookmarks: await Storage.getBookmarks() });
     console.log('[AIDA/Core] Step: removeBookmark done → pushToUI(loads, bookmarks)');
@@ -615,18 +589,6 @@ async function callBroker(loadId) {
     const dispatcher = settings.user || {};
 
     if (load.broker?.phone) {
-        // Lifecycle hook: адаптер сам решает что делать при call
-        const adapter = ADAPTERS[load.board]?.module;
-        if (adapter?.onCall) {
-            try {
-                const wlResult = await adapter.onCall(load);
-                if (wlResult?.worklistItemId) {
-                    await Storage.setLoadWorklistId(loadId, wlResult.worklistItemId);
-                }
-            } catch (e) {
-                console.warn(`[AIDA/Core] ${load.board} onCall failed:`, e.message);
-            }
-        }
 
         // Есть телефон → звоним через Retell
         await Storage.updateLoadStatus(loadId, 'calling');
