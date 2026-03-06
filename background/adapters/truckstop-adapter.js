@@ -544,11 +544,11 @@ const TruckstopAdapter = {
             'Referer': 'https://main.truckstop.com/'
         };
 
-        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
+        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'search');
     },
 
     /** Общий метод выполнения GraphQL запроса и парсинга результатов. */
-    async _doFetch(url, method, headers, body) {
+    async _doFetch(url, method, headers, body, logKey) {
         try {
             const resp = await fetch(url, {
                 method,
@@ -586,6 +586,7 @@ const TruckstopAdapter = {
             const rawResults = findLoadsArray(data, true);
             if (!Array.isArray(rawResults)) return { ok: true, loads: [], meta: { board: BOARD } };
             const loads = normalizeTruckstopResults(rawResults);
+            if (logKey) console.log(`[AIDA/Truckstop] ${logKey}: API returned ${rawResults.length} raw → ${loads.length} normalized`);
             return { ok: true, loads, meta: { board: BOARD } };
         } catch (e) {
             console.error('[AIDA/Truckstop] _doFetch error:', e?.message);
@@ -659,7 +660,15 @@ const TruckstopAdapter = {
             'Referer': 'https://main.truckstop.com/'
         };
 
-        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body);
+        console.log('[AIDA/Truckstop] refreshNew query:', {
+            origin: `${originLat},${originLon}`,
+            radius: args.origin_radius,
+            dates: `${args.pickup_date_begin}→${args.pickup_date_end}`,
+            equipment_ids: args.equipment_ids || 'all',
+            limit: args.limit_num
+        });
+
+        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'refreshNew');
     },
 
     /**
