@@ -28,11 +28,85 @@ const state = {
     agentEnabled: false,
     boardStatus: { dat: false, truckstop: false },
     lastRefreshTime: null,
-    searchPresets: []   // max 8 saved search presets
+    searchPresets: [],   // max 8 saved search presets
+    columns: null,       // ordered column keys (loaded from storage)
+    colWidths: {},       // column key → width in px (persisted)
 };
 
 /** Каскад свежести: Map<loadId, waveLevel> (0 = самые новые, 1 = предыдущая волна) */
 const _waveMap = new Map();
+
+/** Форматирование телефона: +1(XXX)XXX-XXXX ext.123 для US/CA */
+function formatPhone(raw, ext) {
+    if (!raw) return '—';
+    let phone = raw;
+    // Извлекаем добавочный из строки если он встроен (x123, ext 123, #123)
+    if (!ext) {
+        const extMatch = phone.match(/(?:x|ext\.?|#)\s*(\d+)$/i);
+        if (extMatch) {
+            ext = extMatch[1];
+            phone = phone.slice(0, extMatch.index);
+        }
+    }
+    const digits = phone.replace(/\D/g, '');
+    let formatted = raw;
+    // 10 цифр — US без кода страны
+    if (digits.length === 10) {
+        formatted = `+1(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    // 11 цифр начинающихся с 1 — US/CA с кодом страны
+    else if (digits.length === 11 && digits[0] === '1') {
+        formatted = `+1(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
+    }
+    // 12 цифр начинающихся с 52 — Мексика
+    else if (digits.length === 12 && digits.startsWith('52')) {
+        formatted = `+52(${digits.slice(2, 5)})${digits.slice(5, 8)}-${digits.slice(8)}`;
+    }
+    // Другой формат — возвращаем как есть
+    else {
+        formatted = raw;
+    }
+
+    if (ext) formatted += ` ext.${ext}`;
+    return formatted;
+}
+
+/** Реестр всех столбцов таблицы грузов. key → { label, sortKey, cls, render } */
+const ALL_COLUMNS = {
+    rate: { label: 'Rate', sortKey: 'rate', cls: 'td-rate', render: l => l.rate ? `$${l.rate.toLocaleString()}` : '—' },
+    rpm: { label: '$/mi', sortKey: 'rpm', cls: 'td-rpm', render: l => l.rpm ? `$${l.rpm}` : '—' },
+    equipment: { label: 'Type', sortKey: 'equipment', cls: '', render: l => esc(l.equipment || '—') },
+    route: {
+        label: 'Route', sortKey: 'origin', cls: 'td-route', render: l => {
+            const o = `${l.origin?.city || ''}, ${l.origin?.state || ''}`;
+            const d = `${l.destination?.city || ''}, ${l.destination?.state || ''}`;
+            return `<strong>${esc(o)}</strong> <span class="route-arrow">→</span> <strong>${esc(d)}</strong>`;
+        }
+    },
+    miles: { label: 'Miles', sortKey: 'miles', cls: '', render: l => l.miles ? `${Math.round(l.miles).toLocaleString()}` : '—' },
+    weight: { label: 'Weight', sortKey: 'weight', cls: '', render: l => l.weight ? `${(l.weight / 1000).toFixed(0)}k lbs` : '—' },
+    length: { label: 'Length', sortKey: 'length', cls: '', render: l => l.length ? `${l.length} ft` : '—' },
+    fullPartial: { label: 'F/P', sortKey: 'fullPartial', cls: '', render: l => l.fullPartial || '—' },
+    deadhead: { label: 'DH mi', sortKey: 'deadhead', cls: '', render: l => l.deadhead ? `${Math.round(l.deadhead)}` : '—' },
+    broker: { label: 'Broker', sortKey: 'broker', cls: '', render: l => esc(l.broker?.company || '—') },
+    phone: { label: 'Phone', sortKey: 'phone', cls: '', render: l => l.broker?.phone ? formatPhone(l.broker.phone, l.broker?.phoneExt) : '—' },
+    email: { label: 'Email', sortKey: 'email', cls: '', render: l => l.broker?.email ? esc(l.broker.email) : '—' },
+    mc: { label: 'MC#', sortKey: 'mc', cls: '', render: l => l.broker?.mc || '—' },
+    rating: { label: 'Rating', sortKey: 'rating', cls: '', render: l => l.broker?.rating != null ? String(l.broker.rating) : '—' },
+    daysToPay: { label: 'DTP', sortKey: 'daysToPay', cls: '', render: l => l.broker?.daysToPay != null ? `${l.broker.daysToPay}d` : '—' },
+    board: { label: 'Board', sortKey: 'board', cls: 'td-board', render: l => { const b = (l.board || '').toLowerCase(); const iconMap = { dat: 'icons/dat.png', truckstop: 'icons/truckstop.jpg', ts: 'icons/truckstop.jpg', tp: 'icons/tp.webp' }; const src = iconMap[b]; return src ? `<img class="board-icon board-icon--${b}" src="${src}" alt="${esc(l.board || '')}" title="${esc(l.board || '')}">` : `<span class="board-badge ${esc(b)}">${(l.board || '').toUpperCase()}</span>`; } },
+    posted: { label: 'Posted', sortKey: 'postedAt', cls: 'td-posted', render: l => formatPostedAgo(l.postedAt) },
+    pickupDate: { label: 'Pickup', sortKey: 'pickupDate', cls: '', render: l => formatPickupWindow(l.pickupDate, l.pickupDateEnd) },
+    status: { label: 'Status', sortKey: 'status', cls: '', render: l => renderStatusBadge(l.status) },
+    notes: { label: 'Notes', sortKey: 'notes', cls: 'td-notes', render: l => l.notes ? esc(l.notes.substring(0, 35)) : '' },
+    bookNow: { label: 'Book', sortKey: 'bookNow', cls: '', render: l => l.bookNow ? '<span class="book-badge">✓</span>' : '' },
+};
+
+/** Полный порядок всех столбцов для config panel */
+const FULL_COLUMN_ORDER = ['rate', 'rpm', 'equipment', 'route', 'miles', 'weight', 'length', 'fullPartial', 'deadhead', 'broker', 'phone', 'email', 'mc', 'rating', 'daysToPay', 'board', 'posted', 'pickupDate', 'status', 'notes', 'bookNow'];
+
+/** Столбцы видимые по умолчанию */
+const DEFAULT_COLUMNS = ['rate', 'rpm', 'equipment', 'route', 'miles', 'weight', 'broker', 'board', 'posted', 'status'];
 
 /** Обновить волны на основе newLoadIds от Core (только реально новые грузы из auto-refresh). */
 function updateWavesFromCore(newLoadIds) {
@@ -91,9 +165,10 @@ async function init() {
     // Очищаем старые грузы при открытии — каждый раз чистый старт
     await sendToCore('CLEAR_LOADS');
     state.loads = [];
-    // Даты по умолчанию — сегодня (LOCAL, не UTC)
+    // Даты по умолчанию — окно 3 дня (LOCAL, не UTC)
     document.getElementById('date-from').value = localDateStr();
-    document.getElementById('date-to').value = localDateStr();
+    const _initEnd = new Date(); _initEnd.setDate(_initEnd.getDate() + 3);
+    document.getElementById('date-to').value = localDateStr(_initEnd);
 
     // Подставить последний поиск (память формы) — Core сохраняет lastSearch при каждом Search
     if (resp?.settings?.lastSearch) {
@@ -102,6 +177,7 @@ async function init() {
     }
 
     // Статус бордов и тема уже в resp.settings (boardStatus, theme) — применены в applySettings
+    await loadColumnsOrder(); // Load column order before first render
     renderTable();
     updateStatusBar();
 
@@ -179,11 +255,13 @@ function applyLastSearch(lastSearch) {
         const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
         setEquipmentChecked(eqArr);
     }
-    // Даты: всегда сегодня LOCAL (не UTC — иначе вечером в CST/EST дата +1)
+    // Даты: окно 3 дня LOCAL (не UTC — иначе вечером в CST/EST дата +1)
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const end = new Date(now); end.setDate(end.getDate() + 3);
+    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
     setVal('date-from', today);
-    setVal('date-to', today);
+    setVal('date-to', endStr);
 }
 
 // ============================================================
@@ -450,14 +528,23 @@ async function savePresetsToStorage() {
     }
 }
 
-/** Create a preset object from current form values (no dates). */
+/** Create a preset object from current form values (including date window). */
 function buildPresetFromForm() {
+    // Вычисляем относительное окно дат (количество дней между FROM и TO)
+    const fromStr = document.getElementById('date-from').value;
+    const toStr = document.getElementById('date-to').value;
+    let dateWindow = 3; // дефолт
+    if (fromStr && toStr) {
+        const diff = Math.round((new Date(toStr) - new Date(fromStr)) / 86400000);
+        if (diff >= 0) dateWindow = diff;
+    }
     return {
         id: String(Date.now()),
-        origin: document.getElementById('origin-city').value.trim(),  // "Chicago, IL" combined
+        origin: document.getElementById('origin-city').value.trim(),
         radius: parseInt(document.getElementById('search-radius').value) || 50,
-        dest: document.getElementById('dest-city').value.trim(),      // "Dallas, TX" combined
-        equipment: getSelectedEquipment()
+        dest: document.getElementById('dest-city').value.trim(),
+        equipment: getSelectedEquipment(),
+        dateWindow
     };
 }
 
@@ -467,6 +554,7 @@ function presetExists(p) {
         x.origin === p.origin &&
         x.dest === p.dest &&
         x.radius === p.radius &&
+        (x.dateWindow ?? 3) === (p.dateWindow ?? 3) &&
         JSON.stringify(x.equipment.slice().sort()) === JSON.stringify(p.equipment.slice().sort())
     );
 }
@@ -495,7 +583,7 @@ async function handlePresetSave() {
     doSearch();
 }
 
-/** Apply a preset to the form, set dates to today/today+1, then search. */
+/** Apply a preset to the form, restore date window, then search. */
 function applyPreset(presetId) {
     const p = state.searchPresets.find(x => x.id === presetId);
     if (!p) return;
@@ -504,16 +592,17 @@ function applyPreset(presetId) {
     setVal('dest-city', p.dest || '');
     if (p.equipment) setEquipmentChecked(p.equipment);
 
-    // Даты: today и today+1
+    // Даты: today → today + dateWindow (относительное окно)
+    const window = p.dateWindow ?? 3;
     const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + window);
     setVal('date-from', localDateStr(today));
-    setVal('date-to', localDateStr(tomorrow));
+    setVal('date-to', localDateStr(endDate));
 
     // Закрыть dropdown
     document.getElementById('preset-dropdown').classList.remove('open');
-    // Вариант B: apply + auto-search
+    // Apply + auto-search
     doSearch();
 }
 
@@ -550,18 +639,11 @@ function renderPresetDropdown() {
         const lbl = esc(presetLabel(p));
         return `<div class="preset-item" data-id="${p.id}">
             <span class="preset-item-label" title="${lbl}">${lbl}</span>
-            <button class="preset-item-apply" data-action="apply" data-id="${p.id}" title="Apply">✔</button>
             <button class="preset-item-delete" data-action="delete" data-id="${p.id}" title="Delete">✕</button>
         </div>`;
     }).join('');
 
     // Bind clicks
-    listEl.querySelectorAll('.preset-item-apply').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            applyPreset(btn.dataset.id);
-        });
-    });
     listEl.querySelectorAll('.preset-item-delete').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -678,24 +760,14 @@ function bindEvents() {
             if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
         });
 
-    // Table sort
-    document.querySelectorAll('#load-table thead th[data-sort]').forEach(th => {
-        th.addEventListener('click', () => {
-            const col = th.dataset.sort;
-            if (state.sortColumn === col) {
-                state.sortAsc = !state.sortAsc;
-            } else {
-                state.sortColumn = col;
-                state.sortAsc = false;
-            }
-            renderTable();
-            // Update header UI
-            document.querySelectorAll('#load-table thead th').forEach(h => {
-                h.classList.toggle('sorted', h.dataset.sort === col);
-                h.classList.toggle('asc', h.dataset.sort === col && state.sortAsc);
-            });
-        });
-    });
+    // Column reorder + sort via Pointer Events (dynamic headers)
+    initColumnReorder();
+    // Column resize (drag right edge of header)
+    initColumnResize();
+    // Column config panel (⚙️ gear button)
+    initColConfig();
+    // JS-managed frozen header (CSS sticky не работает при overflow-x+y на одном контейнере)
+    initFrozenHeader();
 
     // Detail panel close
     document.getElementById('btn-detail-close').addEventListener('click', closeDetail);
@@ -941,9 +1013,44 @@ function getEmptyMessage() {
 }
 
 function renderTable() {
+    const theadRow = document.getElementById('thead-row');
     const tbody = document.getElementById('loads-tbody');
     const empty = document.getElementById('table-empty');
 
+    // Ensure columns initialized
+    if (!state.columns || !state.columns.length) state.columns = [...DEFAULT_COLUMNS];
+
+    // ── Dynamic thead (в #load-table-header, frozen) ──
+    theadRow.innerHTML = state.columns.map(key => {
+        const col = ALL_COLUMNS[key];
+        if (!col) return '';
+        const isSorted = state.sortColumn === col.sortKey;
+        const sortCls = isSorted ? ` sorted${state.sortAsc ? ' asc' : ''}` : '';
+        const w = state.colWidths?.[key];
+        const wStyle = w ? ` style="width:${w}px"` : '';
+        return `<th data-col-key="${key}" data-sort="${col.sortKey}" class="${sortCls}"${wStyle}>${col.label}<div class="col-resize-handle"></div></th>`;
+    }).join('');
+
+    // ── Синхронизируем ширины колонок в body-таблице через colgroup ──
+    const headerTable = document.getElementById('load-table-header');
+    const bodyTable = document.getElementById('load-table');
+    const colgroup = document.getElementById('load-colgroup');
+
+    if (colgroup) {
+        colgroup.innerHTML = state.columns.map(key => {
+            const w = state.colWidths?.[key];
+            // При table-layout:fixed столбцы без ширины получают дефолт
+            return `<col style="width:${w || 100}px">`;
+        }).join('');
+    }
+
+    // table-layout: fixed на обоих — гарантирует одинаковые ширины
+    if (Object.keys(state.colWidths || {}).length > 0) {
+        if (headerTable) headerTable.style.tableLayout = 'fixed';
+        bodyTable.style.tableLayout = 'fixed';
+    }
+
+    // ── Rows ──
     const loads = getSortedLoads();
 
     if (loads.length === 0) {
@@ -978,14 +1085,23 @@ function getSortedLoads() {
             case 'rpm': va = a.rpm || 0; vb = b.rpm || 0; break;
             case 'miles': va = a.miles || 0; vb = b.miles || 0; break;
             case 'weight': va = a.weight || 0; vb = b.weight || 0; break;
+            case 'length': va = a.length || 0; vb = b.length || 0; break;
+            case 'deadhead': va = a.deadhead || 0; vb = b.deadhead || 0; break;
+            case 'rating': va = a.broker?.rating || 0; vb = b.broker?.rating || 0; break;
+            case 'daysToPay': va = a.broker?.daysToPay || 0; vb = b.broker?.daysToPay || 0; break;
             case 'equipment': va = a.equipment || ''; vb = b.equipment || ''; break;
+            case 'fullPartial': va = a.fullPartial || ''; vb = b.fullPartial || ''; break;
             case 'origin': va = a.origin?.city || ''; vb = b.origin?.city || ''; break;
             case 'destination': va = a.destination?.city || ''; vb = b.destination?.city || ''; break;
             case 'broker': va = a.broker?.company || ''; vb = b.broker?.company || ''; break;
+            case 'phone': va = a.broker?.phone || ''; vb = b.broker?.phone || ''; break;
+            case 'mc': va = a.broker?.mc || ''; vb = b.broker?.mc || ''; break;
             case 'board': va = a.board || ''; vb = b.board || ''; break;
             case 'pickupDate': va = a.pickupDate || ''; vb = b.pickupDate || ''; break;
             case 'postedAt': va = a.postedAt || ''; vb = b.postedAt || ''; break;
             case 'status': va = a.status || ''; vb = b.status || ''; break;
+            case 'notes': va = a.notes || ''; vb = b.notes || ''; break;
+            case 'bookNow': va = a.bookNow ? 1 : 0; vb = b.bookNow ? 1 : 0; break;
         }
 
         if (typeof va === 'string') {
@@ -1010,38 +1126,51 @@ function formatPostedAgo(postedAt) {
     return `${days}d`;
 }
 
-function renderRow(load) {
-    const rate = load.rate ? `$${load.rate.toLocaleString()}` : '—';
-    const rpm = load.rpm ? `$${load.rpm}` : '—';
-    const origin = `${load.origin?.city || ''}, ${load.origin?.state || ''}`;
-    const dest = `${load.destination?.city || ''}, ${load.destination?.state || ''}`;
-    const miles = load.miles ? `${load.miles.toLocaleString()}` : '—';
-    const weight = load.weight ? `${(load.weight / 1000).toFixed(0)}k lbs` : '—';
-    const broker = esc(load.broker?.company || '—');
-    const postedStr = formatPostedAgo(load.postedAt);
-    const status = renderStatusBadge(load.status);
-    const board = `<span class="board-badge ${esc(load.board || '')}">${(load.board || '').toUpperCase()}</span>`;
+/**
+ * Формат окна пикапа для таблицы: MM/DD–MM/DD или MM/DD.
+ */
+function formatPickupWindow(start, end) {
+    if (!start) return '—';
+    const s = start.slice(0, 10);
+    const sStr = `${s.slice(5, 7)}/${s.slice(8, 10)}`;
+    if (!end || end.slice(0, 10) === s) return sStr;
+    const e = end.slice(0, 10);
+    return `${sStr}–${e.slice(5, 7)}/${e.slice(8, 10)}`;
+}
 
+/**
+ * Длинный формат окна пикапа для детаил-панели.
+ * Одна дата → "Mar 05", диапазон → "Mar 05 – Mar 09".
+ */
+function formatPickupWindowLong(start, end) {
+    if (!start) return '—';
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function fmt(dateStr) {
+        const d = dateStr.slice(0, 10);
+        const month = MONTHS[parseInt(d.slice(5, 7), 10) - 1] || '';
+        const day = d.slice(8, 10);
+        return `${month} ${day}`;
+    }
+    const s = start.slice(0, 10);
+    if (!end || end.slice(0, 10) === s) return fmt(s);
+    return `${fmt(s)} – ${fmt(end.slice(0, 10))}`;
+}
+
+
+function renderRow(load) {
     // Каскад свежести: wave-0 (яркий) / wave-1 (бледный) / обычный
     const wave = _waveMap.get(load.id);
     const waveClass = wave === 0 ? ' wave-0' : (wave === 1 ? ' wave-1' : '');
     const rowClass = `status-${load.status || 'active'}${waveClass}`;
 
-    return `
-    <tr data-id="${esc(load.id)}" class="${rowClass}">
-        <td class="td-rate">${rate}</td>
-        <td class="td-rpm">${rpm}</td>
-        <td>${esc(load.equipment || '—')}</td>
-        <td class="td-route"><strong>${esc(origin)}</strong></td>
-        <td style="color:var(--text-muted)">→</td>
-        <td class="td-route"><strong>${esc(dest)}</strong></td>
-        <td>${miles}</td>
-        <td>${weight}</td>
-        <td>${broker}</td>
-        <td>${board}</td>
-        <td class="td-posted">${postedStr}</td>
-        <td>${status}</td>
-    </tr>`;
+    const cells = state.columns.map(key => {
+        const col = ALL_COLUMNS[key];
+        if (!col) return '';
+        const cls = col.cls ? ` class="${col.cls}"` : '';
+        return `<td data-col-key="${key}"${cls}>${col.render(load)}</td>`;
+    }).join('');
+
+    return `<tr data-id="${esc(load.id)}" class="${rowClass}">${cells}</tr>`;
 }
 
 function renderStatusBadge(status) {
@@ -1057,6 +1186,405 @@ function renderStatusBadge(status) {
     };
     const label = labels[status] || status;
     return `<span class="status-badge ${status}">${label}</span>`;
+}
+
+// ============================================================
+// Column Reorder — Google Sheets style (Pointer Events)
+// ============================================================
+
+let _colDrag = null;
+
+function initColumnReorder() {
+    const table = document.getElementById('load-table-header');
+    if (!table) return;
+    table.addEventListener('pointerdown', onColDragStart);
+    document.addEventListener('pointermove', onColDragMove);
+    document.addEventListener('pointerup', onColDragEnd);
+}
+
+function onColDragStart(e) {
+    // Don't start reorder when clicking resize handle
+    if (e.target.closest('.col-resize-handle')) return;
+    const th = e.target.closest('#load-table-header thead th[data-col-key]');
+    if (!th) return;
+
+    e.preventDefault();
+    th.setPointerCapture(e.pointerId);
+
+    const allThs = [...document.querySelectorAll('#load-table-header thead th[data-col-key]')];
+    const colIndex = allThs.indexOf(th);
+
+    // Cells for drag animation: header th + body td
+    const cellsByCol = {};
+    state.columns.forEach(key => {
+        cellsByCol[key] = [
+            ...document.querySelectorAll(`#load-table-header [data-col-key="${key}"]`),
+            ...document.querySelectorAll(`#load-table [data-col-key="${key}"]`)
+        ];
+    });
+
+    _colDrag = {
+        colKey: th.dataset.colKey,
+        colIndex,
+        startX: e.clientX,
+        rects: allThs.map(t => t.getBoundingClientRect()),
+        cellsByCol,
+        moved: false,
+        targetIndex: colIndex,
+    };
+}
+
+function onColDragMove(e) {
+    if (!_colDrag) return;
+
+    const dx = e.clientX - _colDrag.startX;
+
+    // Minimum threshold before starting drag (5px dead zone)
+    if (!_colDrag.moved && Math.abs(dx) < 5) return;
+
+    if (!_colDrag.moved) {
+        _colDrag.moved = true;
+        document.body.classList.add('col-reordering');
+        // Mark dragged column cells
+        _colDrag.cellsByCol[_colDrag.colKey].forEach(el => el.classList.add('col-dragging'));
+    }
+
+    // Translate dragged column
+    const dragKey = _colDrag.colKey;
+    for (const el of _colDrag.cellsByCol[dragKey]) {
+        el.style.transform = `translateX(${dx}px)`;
+    }
+
+    // Compute drag center position
+    const origRect = _colDrag.rects[_colDrag.colIndex];
+    const dragCenter = origRect.left + origRect.width / 2 + dx;
+    const dragWidth = origRect.width;
+
+    // Determine target index based on drag center vs. other column centers
+    let targetIndex = _colDrag.colIndex;
+    for (let i = 0; i < state.columns.length; i++) {
+        if (i === _colDrag.colIndex) continue;
+        const center = _colDrag.rects[i].left + _colDrag.rects[i].width / 2;
+        if (i < _colDrag.colIndex && dragCenter < center) {
+            targetIndex = Math.min(targetIndex, i);
+        } else if (i > _colDrag.colIndex && dragCenter > center) {
+            targetIndex = Math.max(targetIndex, i);
+        }
+    }
+    _colDrag.targetIndex = targetIndex;
+
+    // Shift neighboring columns to make room (CSS transition handles animation)
+    for (let i = 0; i < state.columns.length; i++) {
+        if (i === _colDrag.colIndex) continue;
+        const key = state.columns[i];
+        let shift = 0;
+
+        if (_colDrag.colIndex < targetIndex && i > _colDrag.colIndex && i <= targetIndex) {
+            shift = -dragWidth; // Dragging right → push left
+        } else if (_colDrag.colIndex > targetIndex && i >= targetIndex && i < _colDrag.colIndex) {
+            shift = dragWidth;  // Dragging left → push right
+        }
+
+        for (const el of _colDrag.cellsByCol[key]) {
+            el.style.transform = shift ? `translateX(${shift}px)` : '';
+        }
+    }
+}
+
+function onColDragEnd() {
+    if (!_colDrag) return;
+
+    const from = _colDrag.colIndex;
+    const to = _colDrag.targetIndex;
+
+    // Clear all transforms and classes
+    for (const cells of Object.values(_colDrag.cellsByCol)) {
+        for (const el of cells) {
+            el.style.transform = '';
+            el.classList.remove('col-dragging');
+        }
+    }
+    document.body.classList.remove('col-reordering');
+
+    if (_colDrag.moved) {
+        // Drag completed — reorder columns
+        if (from !== to) {
+            const [moved] = state.columns.splice(from, 1);
+            state.columns.splice(to, 0, moved);
+            saveColumnsConfig();
+        }
+        renderTable();
+    } else {
+        // Click (no drag) — toggle sort
+        const col = ALL_COLUMNS[_colDrag.colKey];
+        if (col?.sortKey) {
+            if (state.sortColumn === col.sortKey) {
+                state.sortAsc = !state.sortAsc;
+            } else {
+                state.sortColumn = col.sortKey;
+                state.sortAsc = false;
+            }
+            renderTable();
+        }
+    }
+
+    _colDrag = null;
+}
+
+/** Save column config (order + widths) to chrome.storage.local */
+function saveColumnsConfig() {
+    try {
+        chrome.storage.local.set({
+            'aida:columnsOrder': state.columns,
+            'aida:colWidths': state.colWidths,
+        });
+    } catch (e) {
+        console.warn('[AIDA/UI] Failed to save columns config:', e);
+    }
+}
+
+/** Load column config (order + widths) from chrome.storage.local */
+function loadColumnsOrder() {
+    return new Promise(resolve => {
+        try {
+            chrome.storage.local.get(['aida:columnsOrder', 'aida:colWidths'], result => {
+                const saved = result?.['aida:columnsOrder'];
+                if (Array.isArray(saved) && saved.length > 0) {
+                    const valid = saved.filter(k => ALL_COLUMNS[k]);
+                    for (const k of DEFAULT_COLUMNS) {
+                        if (!valid.includes(k)) valid.push(k);
+                    }
+                    state.columns = valid;
+                } else {
+                    state.columns = [...DEFAULT_COLUMNS];
+                }
+                state.colWidths = result?.['aida:colWidths'] || {};
+                resolve();
+            });
+        } catch (e) {
+            state.columns = [...DEFAULT_COLUMNS];
+            state.colWidths = {};
+            resolve();
+        }
+    });
+}
+
+// ============================================================
+// Column Resize (drag right edge of header)
+// ============================================================
+
+let _colResize = null;
+
+function initColumnResize() {
+    const table = document.getElementById('load-table-header');
+    if (!table) return;
+    table.addEventListener('pointerdown', onColResizeStart);
+    document.addEventListener('pointermove', onColResizeMove);
+    document.addEventListener('pointerup', onColResizeEnd);
+}
+
+function onColResizeStart(e) {
+    const handle = e.target.closest('.col-resize-handle');
+    if (!handle) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+
+    const th = handle.closest('th[data-col-key]');
+    if (!th) return;
+
+    const headerTable = document.getElementById('load-table-header');
+    const bodyTable = document.getElementById('load-table');
+    const colgroup = document.getElementById('load-colgroup');
+    const allThs = [...headerTable.querySelectorAll('thead th[data-col-key]')];
+
+    // 1) Читаем все ширины ДО любых изменений стилей
+    const widths = allThs.map(t => Math.round(t.getBoundingClientRect().width));
+    const tableWidth = Math.round(headerTable.getBoundingClientRect().width);
+    const colIndex = allThs.indexOf(th);
+
+    // 2) Атомарно замораживаем HEADER
+    headerTable.style.tableLayout = 'fixed';
+    headerTable.style.width = tableWidth + 'px';
+    allThs.forEach((t, i) => {
+        const w = widths[i] + 'px';
+        t.style.width = w;
+        t.style.minWidth = w;
+        t.style.maxWidth = w;
+        state.colWidths[t.dataset.colKey] = widths[i];
+    });
+    th.style.maxWidth = '';  // текущий столбец можно тянуть
+
+    // 3) Атомарно замораживаем BODY (colgroup + table width)
+    if (bodyTable) {
+        bodyTable.style.tableLayout = 'fixed';
+        bodyTable.style.width = tableWidth + 'px';
+    }
+    if (colgroup) {
+        // Каждый <col> получает точную px ширину
+        const cols = [...colgroup.children];
+        cols.forEach((col, i) => {
+            col.style.width = widths[i] + 'px';
+        });
+    }
+
+    _colResize = {
+        colKey: th.dataset.colKey,
+        th,
+        startX: e.clientX,
+        startWidth: widths[colIndex],
+        headerTable,
+        bodyTable,
+        colgroup,
+        colIndex,
+        frozenWidth: tableWidth,
+    };
+
+    document.body.classList.add('col-resizing');
+}
+
+function onColResizeMove(e) {
+    if (!_colResize) return;
+
+    const dx = e.clientX - _colResize.startX;
+    const newWidth = Math.max(40, _colResize.startWidth + dx);
+    const newTableWidth = (_colResize.frozenWidth + dx) + 'px';
+
+    // Header: только текущий th + общая ширина
+    _colResize.th.style.width = newWidth + 'px';
+    _colResize.th.style.minWidth = newWidth + 'px';
+    _colResize.headerTable.style.width = newTableWidth;
+
+    // Body: только текущий col + общая ширина
+    if (_colResize.colgroup) {
+        const col = _colResize.colgroup.children[_colResize.colIndex];
+        if (col) col.style.width = newWidth + 'px';
+    }
+    if (_colResize.bodyTable) {
+        _colResize.bodyTable.style.width = newTableWidth;
+    }
+}
+
+function onColResizeEnd() {
+    if (!_colResize) return;
+
+    // Сохраняем ВСЕ текущие ширины (не только изменённый столбец)
+    const allThs = [..._colResize.headerTable.querySelectorAll('thead th[data-col-key]')];
+    allThs.forEach(t => {
+        state.colWidths[t.dataset.colKey] = Math.round(t.getBoundingClientRect().width);
+        t.style.minWidth = '';
+        t.style.maxWidth = '';
+    });
+
+    // Считаем точную суммарную ширину всех колонок
+    const totalWidth = Object.keys(state.colWidths).reduce((sum, key) => {
+        return state.columns.includes(key) ? sum + (state.colWidths[key] || 100) : sum;
+    }, 0);
+
+    // Ставим точную ширину на обе таблицы — без скачка
+    const tw = totalWidth + 'px';
+    _colResize.headerTable.style.width = tw;
+    if (_colResize.bodyTable) _colResize.bodyTable.style.width = tw;
+
+    saveColumnsConfig();
+    document.body.classList.remove('col-resizing');
+    _colResize = null;
+
+    // Обновить colgroup из актуальных ширин
+    syncFrozenHeader();
+}
+
+// ============================================================
+// Header Scroll Sync — синхронизирует X-скролл header и body
+// ============================================================
+
+function initFrozenHeader() {
+    const wrap = document.getElementById('load-table-wrap');
+    const headerWrap = document.getElementById('table-header-wrap');
+    if (!wrap || !headerWrap) return;
+
+    // Когда body скроллится горизонтально — двигаем header синхронно
+    wrap.addEventListener('scroll', () => {
+        headerWrap.scrollLeft = wrap.scrollLeft;
+    });
+}
+
+/** syncFrozenHeader — обновить ширины colgroup в body при resize */
+function syncFrozenHeader() {
+    const colgroup = document.getElementById('load-colgroup');
+    if (!colgroup) return;
+    const ths = [...document.querySelectorAll('#load-table-header thead th[data-col-key]')];
+    colgroup.innerHTML = ths.map(th => {
+        const w = th.getBoundingClientRect().width || (state.colWidths?.[th.dataset.colKey] || 80);
+        return `<col style="width:${Math.round(w)}px">`;
+    }).join('');
+}
+
+// ============================================================
+// Column Config Panel (⚙️ dropdown with checkboxes)
+// ============================================================
+
+function initColConfig() {
+    const btn = document.getElementById('col-config-btn');
+    const panel = document.getElementById('col-config-panel');
+    if (!btn || !panel) return;
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = panel.classList.toggle('open');
+        if (isOpen) {
+            const rect = btn.getBoundingClientRect();
+            panel.style.top = (rect.bottom + 4) + 'px';
+            panel.style.right = (window.innerWidth - rect.right) + 'px';
+            panel.style.left = 'auto';
+            renderColConfigPanel();
+        }
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#col-config-panel') && !e.target.closest('#col-config-btn')) {
+            panel.classList.remove('open');
+        }
+    });
+}
+
+function renderColConfigPanel() {
+    const panel = document.getElementById('col-config-panel');
+    if (!panel) return;
+
+    const items = FULL_COLUMN_ORDER.map(key => {
+        const col = ALL_COLUMNS[key];
+        if (!col) return '';
+        const checked = state.columns.includes(key) ? 'checked' : '';
+        return `<label class="col-config-item">
+            <input type="checkbox" data-col="${key}" ${checked}>
+            <span>${col.label}</span>
+        </label>`;
+    }).join('');
+
+    panel.innerHTML = `<div class="col-config-header">Columns</div><div class="col-config-list">${items}</div>`;
+
+    // Bind checkbox changes
+    panel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const key = cb.dataset.col;
+            if (cb.checked) {
+                if (!state.columns.includes(key)) {
+                    // Вставляем перед последним столбцом (status обычно последний видимый)
+                    const insertAt = Math.max(0, state.columns.length - 1);
+                    state.columns.splice(insertAt, 0, key);
+                }
+            } else {
+                // Remove
+                state.columns = state.columns.filter(k => k !== key);
+                delete state.colWidths[key];
+            }
+            saveColumnsConfig();
+            renderTable();
+        });
+    });
 }
 
 // ============================================================
@@ -1145,7 +1673,7 @@ function renderDetailContent(load) {
         ${detailRow('Length', load.length ? `${load.length} ft` : '—')}
         ${detailRow('Deadhead', load.deadhead ? `${Math.round(load.deadhead)} mi` : '—')}
         ${detailRow('Full/Partial', load.fullPartial || '—')}
-        ${detailRow('Pickup date', load.pickupDate || '—')}
+        ${detailRow('Pickup window', formatPickupWindowLong(load.pickupDate, load.pickupDateEnd))}
         ${detailRow('Board', (load.board || '').toUpperCase())}
         ${(load.notes && load.notes.trim()) ? detailRow('Notes', esc(load.notes.trim()).replace(/\\n/g, '<br>')) : ''}
     </div>
@@ -1168,23 +1696,65 @@ function detailRow(label, value) {
 let detailMap = null;
 let routeLayer = null;
 
-function initDetailMap(load) {
+/**
+ * Геокодировка «City, ST» → { lat, lng } через Nominatim.
+ * Используется когда адаптер не вернул координаты (Truckstop, TruckerPath).
+ */
+async function geocodeCityState(city, state) {
+    if (!city && !state) return null;
+    const q = [city, state].filter(Boolean).join(', ') + ', USA';
+    try {
+        const resp = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+            { headers: { 'Accept': 'application/json', 'User-Agent': 'AIDA/1.0 (Chrome Extension)' } }
+        );
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const first = Array.isArray(data) && data[0];
+        if (!first) return null;
+        return { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
+    } catch (e) {
+        console.warn('[AIDA/Map] geocodeCityState failed:', e?.message);
+        return null;
+    }
+}
+
+async function initDetailMap(load) {
     const mapEl = document.getElementById('detail-map');
     if (!mapEl) return;
 
-    const oLat = load.origin?.lat;
-    const oLng = load.origin?.lng;
-    const dLat = load.destination?.lat;
-    const dLng = load.destination?.lng;
+    let oLat = load.origin?.lat;
+    let oLng = load.origin?.lng;
+    let dLat = load.destination?.lat;
+    let dLng = load.destination?.lng;
 
-    // Нет координат — скрываем карту
+    // Если нет координат — геокодируем city+state (работает для всех бордов)
+    const needsGeocode = !oLat || !oLng || !dLat || !dLng;
+    if (needsGeocode) {
+        // Показываем спиннер пока геокодируем
+        mapEl.style.display = '';
+        // Уничтожаем старую карту если была
+        if (detailMap) { detailMap.remove(); detailMap = null; routeLayer = null; }
+        mapEl.innerHTML = '<div class="map-geocoding"><span class="map-geocoding-dot"></span><span class="map-geocoding-dot"></span><span class="map-geocoding-dot"></span></div>';
+
+        const [oCoords, dCoords] = await Promise.all([
+            (!oLat || !oLng) ? geocodeCityState(load.origin?.city, load.origin?.state) : Promise.resolve({ lat: oLat, lng: oLng }),
+            (!dLat || !dLng) ? geocodeCityState(load.destination?.city, load.destination?.state) : Promise.resolve({ lat: dLat, lng: dLng }),
+        ]);
+
+        mapEl.innerHTML = '';
+        if (oCoords) { oLat = oCoords.lat; oLng = oCoords.lng; }
+        if (dCoords) { dLat = dCoords.lat; dLng = dCoords.lng; }
+    }
+
+    // Если после геокодинга координат нет — скрываем карту
     if (!oLat || !oLng || !dLat || !dLng) {
         mapEl.style.display = 'none';
         return;
     }
     mapEl.style.display = '';
 
-    // Уничтожаем предыдущую карту
+    // Уничтожаем предыдущую карту (если не было геокодинга)
     if (detailMap) {
         detailMap.remove();
         detailMap = null;
@@ -1573,7 +2143,6 @@ function toggleTheme() {
     const isDark = html.dataset.theme === 'dark';
     const newTheme = isDark ? 'light' : 'dark';
     html.dataset.theme = newTheme;
-    console.log('[AIDA/UI] Step: toggleTheme →', newTheme);
     sendToCore('SAVE_SETTINGS', { data: { theme: newTheme } });
 }
 

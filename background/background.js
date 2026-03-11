@@ -164,7 +164,6 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
         const aidaTabs = await chrome.tabs.query({ url: AIDA_UI_URL + '*' });
         if (aidaTabs.length === 0) {
             await Storage.setLoads([]);
-
         }
     } catch (e) {
         // Tab query может упасть если браузер закрывается
@@ -258,10 +257,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case 'CLEAR_LOADS':
-            Storage.setLoads([]).then(() => {
-
-                sendResponse({ ok: true });
-            }).catch(err => sendResponse({ error: err.message }));
+            Storage.setLoads([]).then(() =>
+                sendResponse({ ok: true })
+            ).catch(err => sendResponse({ error: err.message }));
             return true;
 
         case 'GET_SETTINGS':
@@ -401,8 +399,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// Все harvester handlerы удалены — адаптеры полностью автономны.
-// TP_SEARCH_RESPONSE / TP_SEARCH_REQUEST_CAPTURED → TruckerpathAdapter (router выше).
 
 // ============================================================
 // searchLoads — тонкий оркестратор через Adapter Registry
@@ -847,11 +843,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
                 if (status === 'disconnected') return; // не залогинен — не нужно
 
                 const result = await AuthTruckstop.silentRefresh();
-                if (result?.ok) {
-
-                    await pushToUI({ settings: await getSettingsForUI() });
+                if (!result?.ok) {
+                    console.warn('[AIDA/Core] Proactive TS refresh failed');
                 } else {
-
+                    await pushToUI({ settings: await getSettingsForUI() });
                 }
             } catch (e) {
                 console.warn('[AIDA/Core] Proactive TS refresh error:', e.message);

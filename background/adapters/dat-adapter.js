@@ -505,7 +505,7 @@ function normalize(raw) {
             lat: dest.latitude ?? null,
             lng: dest.longitude ?? null,
         },
-        equipment: EQ_NAMES[eqCode] || eqCode || 'Unknown',
+        equipment: eqCode || 'Unknown',
         equipmentName: EQ_NAMES[eqCode] || eqCode || '',
         equipmentAll: eqCode ? [eqCode] : [],
         weight: cap.maximumWeightPounds || null,
@@ -531,6 +531,11 @@ function normalize(raw) {
             const av = raw.availability || item.availability;
             if (!av || !av.earliestWhen) return '';
             return String(av.earliestWhen).split('T')[0] || '';
+        })(),
+        pickupDateEnd: (function () {
+            const av = raw.availability || item.availability;
+            if (!av || !av.latestWhen) return '';
+            return String(av.latestWhen).split('T')[0] || '';
         })(),
         postedAt: raw.servicedWhen || item.servicedWhen || raw.postedAt || '',
         status: 'active',

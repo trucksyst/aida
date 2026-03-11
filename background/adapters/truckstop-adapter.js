@@ -210,6 +210,28 @@ fragment GridLoadSearchFields on loads_grid_ret_type {
   __typename
 }`;
 
+/** Batch GraphQL query для обогащения: email, координаты, commodityDescription.
+ *  Запрашивает таблицу `loads` напрямую (не view), где есть brokerProfile + postAsUser. */
+const DETAIL_GRAPHQL_QUERY = `query GetLoadsByIds($loadIds: [uuid!]!) {
+  loads(where: {id: {_in: $loadIds}}) {
+    id
+    postAsUser {
+      emailAddress
+      __typename
+    }
+    brokerProfile {
+      emailAddress
+      __typename
+    }
+    originLat
+    originLon
+    destinationLat
+    destinationLon
+    commodityDescription
+    __typename
+  }
+}`;
+
 /** Геокодировка origin (city, state) → lat, lon через Nominatim. */
 async function geocodeOrigin(origin) {
     if (!origin || (!origin.city && !origin.state)) return null;
@@ -297,7 +319,9 @@ function normalizeTruckstopRaw(raw) {
     const rpm = milesNum && rateNum ? Math.round((rateNum / milesNum) * 100) / 100 : null;
 
     const originEarly = str(raw.originEarlyTime ?? raw.pickupDate ?? raw.availableDate ?? '');
+    const originLate = str(raw.originLateTime ?? '');
     const pickupDate = originEarly ? originEarly.split('T')[0] : '';
+    const pickupDateEnd = originLate ? originLate.split('T')[0] : '';
     // Truckstop timestamps — UTC без 'Z', добавляем для правильного парсинга
     let postedAt = str(raw.updatedOn || raw.createdOn || raw.postedAt || '');
     if (postedAt && !postedAt.endsWith('Z') && !postedAt.includes('+')) {
@@ -346,6 +370,7 @@ function normalizeTruckstopRaw(raw) {
         },
         notes,
         pickupDate,
+        pickupDateEnd,
         postedAt,
         status: 'active',
         bookNow: !!(raw.isBookItNow || raw.canBookItNow),
@@ -544,7 +569,11 @@ const TruckstopAdapter = {
             'Referer': 'https://main.truckstop.com/'
         };
 
-        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'search');
+        const result = await this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'search');
+        if (result.ok && result.loads.length > 0) {
+            await this._enrichLoads(result.loads, token);
+        }
+        return result;
     },
 
     /** Общий метод выполнения GraphQL запроса и парсинга результатов. */
@@ -660,15 +689,83 @@ const TruckstopAdapter = {
             'Referer': 'https://main.truckstop.com/'
         };
 
-        console.log('[AIDA/Truckstop] refreshNew query:', {
-            origin: `${originLat},${originLon}`,
-            radius: args.origin_radius,
-            dates: `${args.pickup_date_begin}→${args.pickup_date_end}`,
-            equipment_ids: args.equipment_ids || 'all',
-            limit: args.limit_num
-        });
+        const result = await this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'refreshNew');
+        if (result.ok && result.loads.length > 0) {
+            await this._enrichLoads(result.loads, auth.token);
+        }
+        return result;
+    },
 
-        return this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'refreshNew');
+    /**
+     * Batch-обогащение нормализованных грузов: email, координаты, commodity.
+     * Один запрос GetLoadsByIds на ВСЕ грузы → мерж в существующие поля контракта.
+     */
+    async _enrichLoads(loads, token) {
+        if (!loads || loads.length === 0) return;
+        const uuids = loads.map(l => l.raw?.id).filter(Boolean);
+        if (uuids.length === 0) return;
+
+        try {
+            const body = JSON.stringify({
+                operationName: 'GetLoadsByIds',
+                variables: { loadIds: uuids },
+                query: DETAIL_GRAPHQL_QUERY
+            });
+            const resp = await fetch(BUILTIN_GRAPHQL_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'Origin': 'https://main.truckstop.com',
+                    'Referer': 'https://main.truckstop.com/'
+                },
+                credentials: 'include',
+                body
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const details = data?.data?.loads;
+            if (!Array.isArray(details) || details.length === 0) return;
+
+            // id → detail map
+            const map = {};
+            for (const d of details) map[d.id] = d;
+
+            let enriched = 0;
+            for (const load of loads) {
+                const d = map[load.raw?.id];
+                if (!d) continue;
+
+                // Email: prefer brokerProfile, fallback postAsUser
+                const email = d.brokerProfile?.emailAddress || d.postAsUser?.emailAddress || '';
+                if (email && !load.broker.email) {
+                    load.broker.email = email;
+                }
+
+                // Точные координаты (без геокодинга)
+                if (d.originLat != null && d.originLon != null) {
+                    load.origin.lat = d.originLat;
+                    load.origin.lng = d.originLon;
+                }
+                if (d.destinationLat != null && d.destinationLon != null) {
+                    load.destination.lat = d.destinationLat;
+                    load.destination.lng = d.destinationLon;
+                }
+
+                // Commodity description → notes с пометкой C.D:
+                const cd = str(d.commodityDescription ?? '');
+                if (cd && !load.notes.includes(cd)) {
+                    load.notes = load.notes
+                        ? `${load.notes} | C.D: ${cd}`
+                        : `C.D: ${cd}`;
+                }
+                enriched++;
+            }
+            if (enriched > 0) console.log(`[AIDA/Truckstop] enriched ${enriched}/${loads.length} loads (email+coords+commodity)`);
+        } catch (e) {
+            console.warn('[AIDA/Truckstop] _enrichLoads error:', e?.message);
+        }
     },
 
     /**
@@ -683,10 +780,8 @@ const TruckstopAdapter = {
     // ─── Внутренние методы polling (не публичные) ─────────────
 
     _startPolling() {
-        // Только пересоздаём alarm — НЕ трогаем _realtimeParams
         chrome.alarms.clear(TS_REFRESH_ALARM).catch(() => { });
         chrome.alarms.create(TS_REFRESH_ALARM, { periodInMinutes: TS_REFRESH_INTERVAL_MIN });
-        console.log('[AIDA/Truckstop] Realtime polling started (alarm every', TS_REFRESH_INTERVAL_MIN * 60, 'sec)');
     },
 
     _stopPolling() {
@@ -699,27 +794,18 @@ const TruckstopAdapter = {
      * Делает refreshNew() и вызывает callback с новыми грузами.
      */
     async handleAlarm() {
-        if (!this._realtimeParams) {
-            console.log('[AIDA/Truckstop] handleAlarm: no realtimeParams, skipping');
-            return;
-        }
-        console.log('[AIDA/Truckstop] handleAlarm: refreshing...');
+        if (!this._realtimeParams) return;
         let result = await this.refreshNew(this._realtimeParams);
 
-        // JWT протух → silent refresh → retry
         if (!result?.ok && (result?.error?.code === 'AUTH_REQUIRED' || result?.error?.code === 'NO_CLAIMS')) {
-            console.log('[AIDA/Truckstop] auto-refresh: JWT expired, trying silent refresh...');
+            console.warn('[AIDA/Truckstop] JWT expired — silent refresh...');
             const refreshResult = await AuthTruckstop.silentRefresh();
             if (refreshResult.ok) {
                 result = await this.refreshNew(this._realtimeParams);
             }
         }
 
-        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) {
-            console.log('[AIDA/Truckstop] handleAlarm: no new loads, ok:', result?.ok, 'loads:', result?.loads?.length || 0);
-            return;
-        }
-        console.log('[AIDA/Truckstop] handleAlarm: got', result.loads.length, 'loads, pushing to UI');
+        if (!result?.ok || !Array.isArray(result.loads) || result.loads.length === 0) return;
 
         // Вызываем callback — Core решит что делать с новыми грузами
         if (this._onRealtimeUpdate) {

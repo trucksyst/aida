@@ -164,28 +164,38 @@
                         </button>
 
                         <button class="btn-search" id="btn-search">Search</button>
+
+                        <div class="col-config-wrap">
+                            <button class="col-config-btn" id="col-config-btn" title="Configure columns">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3" />
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                </svg>
+                            </button>
+                            <div class="col-config-panel" id="col-config-panel">
+                                <!-- Filled by JS -->
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Table area -->
                     <div id="table-area">
-                        <div id="load-table-wrap">
-                            <table id="load-table">
+                        <!-- Frozen header (живёт вне scroll-контейнера, скроллится только X) -->
+                        <div id="table-header-wrap">
+                            <table id="load-table-header">
                                 <thead>
-                                    <tr>
-                                        <th data-sort="rate">Rate $</th>
-                                        <th data-sort="rpm">$/mi</th>
-                                        <th data-sort="equipment">Type</th>
-                                        <th data-sort="origin">Origin</th>
-                                        <th>→</th>
-                                        <th data-sort="destination">Destination</th>
-                                        <th data-sort="miles">Miles</th>
-                                        <th data-sort="weight">Weight</th>
-                                        <th data-sort="broker">Broker</th>
-                                        <th data-sort="board">Board</th>
-                                        <th data-sort="postedAt">Posted</th>
-                                        <th data-sort="status">Status</th>
+                                    <tr id="thead-row">
+                                        <!-- Generated dynamically by JS (Column Manager) -->
                                     </tr>
                                 </thead>
+                            </table>
+                        </div>
+                        <!-- Body (скроллится Y и X) -->
+                        <div id="load-table-wrap">
+                            <table id="load-table">
+                                <colgroup id="load-colgroup"></colgroup>
                                 <tbody id="loads-tbody">
                                     <!-- Заполняется из JS -->
                                 </tbody>
