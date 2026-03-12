@@ -555,10 +555,16 @@ const TruckstopAdapter = {
 
         }
 
-        const body = JSON.stringify({
+        const body1 = JSON.stringify({
             operationName: 'LoadSearchSortByBinRateDesc',
             variables: { args, isPro: false },
             query: BUILTIN_GRAPHQL_QUERY
+        });
+
+        const body2 = JSON.stringify({
+            operationName: 'LoadSearchSortByUpdatedOnDesc',
+            variables: { args: { ...args }, isPro: false },
+            query: BUILTIN_GRAPHQL_QUERY_UPDATED
         });
 
         const headers = {
@@ -569,8 +575,29 @@ const TruckstopAdapter = {
             'Referer': 'https://main.truckstop.com/'
         };
 
-        const result = await this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body, 'search');
-        if (result.ok && result.loads.length > 0) {
+        // Два запроса параллельно: по рейту + по свежести
+        const [r1, r2] = await Promise.all([
+            this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body1, 'search-rate'),
+            this._doFetch(BUILTIN_GRAPHQL_URL, 'POST', headers, body2, 'search-updated')
+        ]);
+
+        // Если оба упали — возвращаем ошибку первого
+        if (!r1.ok && !r2.ok) return r1;
+
+        // Merge с дедупликацией по id (rate first, updated дополняет)
+        const seen = new Set();
+        const merged = [];
+        for (const load of [...(r1.ok ? r1.loads : []), ...(r2.ok ? r2.loads : [])]) {
+            if (!seen.has(load.id)) {
+                seen.add(load.id);
+                merged.push(load);
+            }
+        }
+
+        console.log(`[AIDA/Truckstop] search: merged ${r1.loads?.length || 0} (rate) + ${r2.loads?.length || 0} (updated) → ${merged.length} unique`);
+
+        const result = { ok: true, loads: merged, meta: { board: BOARD } };
+        if (result.loads.length > 0) {
             await this._enrichLoads(result.loads, token);
         }
         return result;
