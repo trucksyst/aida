@@ -664,7 +664,7 @@ const TruckstopAdapter = {
             show_empty_minimum_authority_days_required: null,
             carrier_factoring_company_id: null,
             offset_num: 0,
-            limit_num: 20   // Маленькая пачка — только свежие
+            limit_num: 100
         };
         if (!args.pickup_date_end) {
             const d = new Date(args.pickup_date_begin);

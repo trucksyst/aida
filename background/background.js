@@ -26,6 +26,7 @@ import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter from './adapters/truckerpath-adapter.js';
 import AuthTruckstop from './auth/auth-truckstop.js';
+import AuthTruckerpath from './auth/auth-truckerpath.js';
 
 // ============================================================
 // Adapter Registry — каждый адаптер — чёрный ящик с единым контрактом
@@ -35,7 +36,7 @@ import AuthTruckstop from './auth/auth-truckstop.js';
 const ADAPTERS = {
     dat: { module: DatAdapter, displayName: 'DAT', hasAuthModule: true },
     truckstop: { module: TruckstopAdapter, displayName: 'Truckstop', hasAuthModule: true },
-    tp: { module: TruckerpathAdapter, displayName: 'TruckerPath', hasAuthModule: false },
+    tp: { module: TruckerpathAdapter, displayName: 'TruckerPath', hasAuthModule: true },
 };
 
 // Регистрируем callback для realtime updates (один раз при старте)
@@ -181,22 +182,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // ----- Harvesters -----
 
         case 'TOKEN_HARVESTED':
-            // Используется только для бордов с content scripts (TP).
-            // DAT harvester удалён — DAT использует direct fetch.
-            sendResponse({ ok: true });
-            break;
-
-        case 'TP_SEARCH_RESPONSE':
-            TruckerpathAdapter.handleSearchResponse(message.results, message.sourceUrl)
-                .then(async (merged) => {
-                    if (merged) await pushToUI({ loads: merged, settings: await getSettingsForUI() });
-                })
-                .catch(console.error);
-            sendResponse({ ok: true });
-            break;
-
-        case 'TP_SEARCH_REQUEST_CAPTURED':
-            TruckerpathAdapter.handleRequestCaptured(message).catch(console.error);
+            // Legacy — бОльшая часть бордов использует Auth отдельные модули.
             sendResponse({ ok: true });
             break;
 
@@ -787,19 +773,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (!tab?.url || !tab.windowId) return;
     if (!isBoardTab(tab.url)) return;
 
-    // Инъекция харвестера TruckerPath в MAIN world после загрузки страницы — иначе перехват не срабатывает.
-    if (tab.url.startsWith(TRUCKERPATH_LOADBOARD)) {
-        try {
-            await chrome.scripting.executeScript({
-                target: { tabId },
-                files: ['harvesters/harvester-truckerpath.js'],
-                world: 'MAIN'
-            });
-            console.log('[AIDA/Core] TruckerPath harvester injected into tab', tabId);
-        } catch (e) {
-            console.warn('[AIDA/Core] TruckerPath harvester injection failed:', e?.message);
-        }
-    }
+    // TruckerPath: харвестер больше не нужен — адаптер делает прямые API вызовы.
 
     // Не запускаем searchLoads автоматически: грузы уже приходят от харвестера (handleDatSearchResponse).
     // Повторный поиск — только по кнопке Search во вкладке AIDA.
@@ -835,6 +809,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'aida-ts-refresh') {
         TruckstopAdapter.handleAlarm().catch(e => console.warn('[AIDA/Core] TS auto-refresh error:', e.message));
     }
+    // TruckerPath auto-refresh (60 сек)
+    if (alarm.name === 'aida-tp-refresh') {
+        TruckerpathAdapter.handleAlarm().catch(e => console.warn('[AIDA/Core] TP auto-refresh error:', e.message));
+    }
     if (alarm.name === 'aida-ts-proactive-refresh') {
         // Проактивно обновляем JWT Truckstop пока он ещё валидный
         (async () => {
@@ -865,7 +843,7 @@ async function init() {
 
     // Проактивный refresh токенов всех connected бордов при старте (§18 ТЗ)
     try {
-        const boards = ['truckstop', 'dat'];
+        const boards = ['truckstop', 'dat', 'tp'];
         for (const board of boards) {
             const adapter = ADAPTERS[board]?.module;
             if (adapter?.getStatus) {

@@ -153,6 +153,67 @@ background/auth/
 - Токен Truckstop обновляется через API: `POST https://v5-auth.truckstop.com/auth/renew` с текущим JWT.
 - Стратегия та же: «refresh at every use» + proactive refresh по alarm каждые 15 минут.
 
+**Flow логина TruckerPath (REST API):**
+
+1. UI отправляет `LOGIN_BOARD { board: 'tp' }`
+2. AuthManager вызывает `AuthTruckerpath.login()` → popup `loadboard.truckerpath.com/login`
+3. Пользователь вводит email + password
+4. При submit — прямой API вызов:
+   ```
+   POST https://api.truckerpath.com/tl/login/web/v2
+   Headers:
+     client: WebCarriers/0.0.0
+     installation-id: {uuid}  ← генерируется один раз, хранится в Storage
+     signature: {md5_hash}    ← MD5 подпись (см. ниже)
+     timestamp: {unix_ms}     ← текущее время в ms
+     Content-Type: application/json;charset=UTF-8
+   Body:
+     { email, password, is_reactive: 0, grant_type: "password", device_token: "" }
+   ```
+5. Response: `{ code: 200, data: { token: "r:{hex32}", expires_in: 30306379, refresh_token: "uuid" } }`
+6. Токен сохраняется в `token:truckerpath` (Storage) + мета-данные в `auth:truckerpath:meta`
+7. Popup закрывается, UI обновляет статус борда → 🟢 Connected
+
+**Генерация signature (MD5):**
+```
+signature = MD5(
+  "device_token=&email={email}&grant_type=password&password={password}"
+  + "&installationId={uuid}&secret=eyFsGFeZ@Sajb$ZW"
+  + "&timestamp={timestamp}&url=/tl/login/web/v2"
+)
+```
+- Секрет `eyFsGFeZ@Sajb$ZW` — hardcoded в JS сайта
+- MD5 через `blueimp-md5` (или встроенный crypto)
+- Подпись требуется **только** для login endpoint, остальные запросы — без подписи
+
+**Хранение токена в TP:**
+- TP React-приложение хранит токен в `localStorage.accessToken`
+- Все API запросы: заголовок `x-auth-token: r:{hex32}` (не `Authorization: Bearer ...`!)
+- Доп. заголовки: `client: WebCarriers/0.0.0`, `installation-id: {uuid}`
+
+**Silent Refresh TruckerPath:**
+
+- Токен живёт **~351 день** (`expires_in: 30306379` сек) — почти год, refresh практически не нужен.
+- Проверка валидности: `GET /tl/users/me` с `x-auth-token` → 200 = токен жив.
+- `refresh_token` есть в response, но сайт его **не использует** (нет endpoint для refresh).
+- Стратегия: при каждом `getToken()` → fire-and-forget проверка через `/tl/users/me`.
+- При ошибке 401/403 → статус `'expired'` → пользователь перелогинивается.
+
+**Без авторизации:**
+- Поиск грузов работает, но `broker` ограничен — только `company` (нет email, phone, mc, dot, rating).
+- Для полноценной работы авторизация обязательна.
+
+**Исследование TruckerPath API (справка):**
+
+- Base URL: `https://api.truckerpath.com`
+- Login: `POST /tl/login/web/v2` — email + password + MD5 signature
+- Поиск: `POST /tl/search/filter/web/v2` — основной поиск грузов
+- Доп. поиски: `/tl/coyote/search/filter/web/v2` (Coyote), `/tl/chr/search/filter/web/v2` (CHR) — параллельные, обычно пустые
+- Обратные грузы: `POST /tl/backhaul`
+- Профиль: `GET /tl/users/me`
+- Геокодинг: `POST /tl/city/place`, `POST /tl/state/city/city-auto-complete`
+- reCAPTCHA: запрашивается при ошибке `code: 900006` (2-я попытка логина)
+
 **Совместимость:**
 
 - DAT harvester **удалён** из manifest.json — не нужен для silent refresh.
@@ -548,23 +609,25 @@ Core вызывает методы через registry: `ADAPTERS[board].module.
 
 ### Equipment Types (15 типов — пересечение DAT + Truckstop + TruckerPath)
 
-| # | UI value | DAT код | Описание |
-|---|----------|---------|----------|
-| 1 | VAN | V | Dry Van — закрытый прицеп |
-| 2 | REEFER | R | Рефрижератор |
-| 3 | FLATBED | F | Открытая платформа |
-| 4 | STEPDECK | SD | Step Deck — двухуровневая платформа |
-| 5 | DOUBLEDROP | DD | Double Drop — пониженная секция |
-| 6 | LOWBOY | LB | Низкорамная платформа |
-| 7 | RGN | RG | Removable Gooseneck — съёмная шея |
-| 8 | HOPPER | HB | Hopper Bottom — сыпучие грузы |
-| 9 | TANKER | TA | Цистерна |
-| 10 | POWERONLY | PO | Только тягач (без прицепа) |
-| 11 | CONTAINER | C | Контейнер |
-| 12 | DUMP | DT | Самосвальный прицеп |
-| 13 | AUTOCARRIER | AC | Автовоз |
-| 14 | LANDOLL | LA | Drop Deck Landoll |
-| 15 | MAXI | MX | Flatbed Maxi (двойная платформа) |
+| # | UI value | DAT код | TP API key | Описание |
+|---|----------|---------|------------|----------|
+| 1 | VAN | V | `van` | Dry Van — закрытый прицеп |
+| 2 | REEFER | R | `reefer` | Рефрижератор |
+| 3 | FLATBED | F | `flatbed` | Открытая платформа |
+| 4 | STEPDECK | SD | `stepdeck` | Step Deck — двухуровневая платформа |
+| 5 | DOUBLEDROP | DD | `double drop` | Double Drop — пониженная секция |
+| 6 | LOWBOY | LB | `lowboy` | Низкорамная платформа |
+| 7 | RGN | RG | — | Removable Gooseneck — съёмная шея (нет в TP) |
+| 8 | HOPPER | HB | `hopper bottom` | Hopper Bottom — сыпучие грузы |
+| 9 | TANKER | TA | `tanker` | Цистерна |
+| 10 | POWERONLY | PO | `power only` | Только тягач (без прицепа) |
+| 11 | CONTAINER | C | `containers` | Контейнер |
+| 12 | DUMP | DT | `dump trailer` | Самосвальный прицеп |
+| 13 | AUTOCARRIER | AC | `auto carrier` | Автовоз |
+| 14 | LANDOLL | LA | — | Drop Deck Landoll (нет в TP) |
+| 15 | MAXI | MX | — | Flatbed Maxi (нет в TP) |
+
+> **TP Equipment маппинг:** TruckerPath API принимает equipment как массив **lowercase строк с пробелами** (`"power only"`, `"double drop"`, `"hopper bottom"`). Адаптер TP должен маппить AIDA UI value → TP API key при формировании запроса. Типы без TP API key (RGN, LANDOLL, MAXI) — пропускаются при поиске на TP (не отправляются в запрос). TP-эксклюзивные типы (B-Train, Box Truck, Conestoga, Dry Bulk, Hotshot) — не включены в AIDA, т.к. не используются.
 
 ### Equipment Multi-Select UI
 
@@ -787,7 +850,36 @@ getToken(board):
 |------|------|----------|--------|
 | 1 | Truckstop | Auth popup (PingOne) + silent refresh (/auth/renew) + проактивный alarm (15 мин), адаптер автономный | ✅ Готово |
 | 2 | DAT | Переписать `silentRefresh()` без зависимости от харвестера, отключить `harvester-dat.js` | Запланировано |
-| 3 | TruckerPath | Написать `auth-truckerpath.js`, сделать адаптер автономным, отключить `harvester-truckerpath.js` | Запланировано |
+| 3 | TruckerPath | `auth-truckerpath.js` (popup + webRequest x-auth-token), адаптер на прямые API, polling 60s | ✅ Готово |
+
+**Заметка: Truckstop dual-query merge (TODO):**
+
+Truckstop GraphQL имеет два query с одинаковыми фильтрами, но разной сортировкой:
+- `LoadSearchSortByBinRateDesc` — топ-100 по рейту (самые дорогие)
+- `LoadSearchSortByUpdatedOnDesc` — топ-100 по updatedOn (самые свежие)
+
+При `search()` (кнопка Search) нужно вызывать **оба query параллельно** и мержить результаты с дедупликацией по `id`. Это даёт ~130-170 уникальных грузов вместо 100, покрывая и дорогие, и свежие.
+
+При `refreshNew()` (auto-refresh 30 сек) — оставляем `UpdatedOnDesc` один, он только добавляет свежие поверх существующих.
+
+**Детали Фазы 3 (TruckerPath):**
+
+1. **`auth-truckerpath.js`** — модуль авторизации:
+   - `login()` → popup `loadboard.truckerpath.com/login` → перехват `x-auth-token` из заголовков через `webRequest` listener, или прямой API вызов `POST /tl/login/web/v2` с MD5 подписью (секрет: `eyFsGFeZ@Sajb$ZW`)
+   - `getToken()` → вернуть из Storage `token:truckerpath` (формат `r:{hex32}`)
+   - `silentRefresh()` → `GET /tl/users/me` для проверки валидности (токен ~351 день)
+   - `getStatus()` / `disconnect()` — по аналогии с `auth-truckstop.js`
+   - Storage keys: `token:truckerpath`, `auth:truckerpath:meta`, `auth:truckerpath:installationId`
+
+2. **Переписать `truckerpath-adapter.js`:**
+   - Убрать template-replay логику (template capture, `modifyTemplateBody`, `patchSearchParams`)
+   - Убрать harvester handlers (`handleSearchResponse`, `handleRequestCaptured`)
+   - Прямой `POST /tl/search/filter/web/v2` с параметрами поиска (формат известен из HAR)
+   - Заголовки: `x-auth-token`, `client: WebCarriers/0.0.0`, `installation-id: {uuid}`
+   - Equipment маппинг AIDA → TP API key (lowercase строки с пробелами)
+   - `hasAuthModule: true` в Registry
+
+3. **Удалить `harvester-truckerpath.js`** и убрать из `manifest.json`
 
 ### Обновление структуры проекта (после всех фаз)
 

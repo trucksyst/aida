@@ -3,7 +3,7 @@
   "minimum_chrome_version": "114",
   "name": "AIDA — AI Dispatcher",
   "short_name": "AIDA",
-  "version": "0.1.82",
+  "version": "0.1.83",
   "description": "Персональный инструмент диспетчера. Агрегирует грузы со всех лоадбордов в одном окне.",
   "background": {
     "service_worker": "background/background.js",
@@ -17,7 +17,8 @@
     "tabs",
     "scripting",
     "alarms",
-    "cookies"
+    "cookies",
+    "webRequest"
   ],
   "host_permissions": [
     "https://one.dat.com/*",
@@ -40,25 +41,5 @@
     "https://router.project-osrm.org/*",
     "https://tile.openstreetmap.org/*"
   ],
-  "content_scripts": [
-    {
-      "js": [
-        "harvesters/harvester-bridge.js"
-      ],
-      "matches": [
-        "https://loadboard.truckerpath.com/*"
-      ],
-      "run_at": "document_start"
-    },
-    {
-      "js": [
-        "harvesters/harvester-truckerpath.js"
-      ],
-      "matches": [
-        "https://loadboard.truckerpath.com/*"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    }
-  ]
+  "content_scripts": []
 }
