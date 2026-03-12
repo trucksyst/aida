@@ -25,8 +25,10 @@ import Retell from './retell.js';
 import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter from './adapters/truckerpath-adapter.js';
+import LB123Adapter from './adapters/123lb-adapter.js';
 import AuthTruckstop from './auth/auth-truckstop.js';
 import AuthTruckerpath from './auth/auth-truckerpath.js';
+import Auth123LB from './auth/auth-123lb.js';
 
 // ============================================================
 // Adapter Registry — каждый адаптер — чёрный ящик с единым контрактом
@@ -37,6 +39,7 @@ const ADAPTERS = {
     dat: { module: DatAdapter, displayName: 'DAT', hasAuthModule: true },
     truckstop: { module: TruckstopAdapter, displayName: 'Truckstop', hasAuthModule: true },
     tp: { module: TruckerpathAdapter, displayName: 'TruckerPath', hasAuthModule: true },
+    '123lb': { module: LB123Adapter, displayName: '123LB', hasAuthModule: true },
 };
 
 // Регистрируем callback для realtime updates (один раз при старте)
@@ -68,7 +71,8 @@ async function isBoardTabOpen(board) {
     const patterns = {
         dat: ['https://one.dat.com/*', 'https://power.dat.com/*'],
         truckstop: ['https://*.truckstop.com/*'],
-        tp: ['https://loadboard.truckerpath.com/*']
+        tp: ['https://loadboard.truckerpath.com/*'],
+        '123lb': ['https://members.123loadboard.com/*']
     };
     const urls = patterns[board];
     if (!urls) return false;
@@ -751,7 +755,8 @@ const BOARD_URL_PREFIXES = [
     'https://one.dat.com/',
     'https://www.truckstop.com/',
     'https://truckstop.com/',
-    'https://loadboard.truckerpath.com/'
+    'https://loadboard.truckerpath.com/',
+    'https://members.123loadboard.com/'
 ];
 
 function isBoardTab(url) {
@@ -792,6 +797,8 @@ chrome.alarms.create('aida-cleanup', { periodInMinutes: 60 });
 // Проактивный refresh JWT Truckstop — каждые 15 мин ДО истечения токена.
 // Устраняет необходимость popup-логина (§18 ТЗ).
 chrome.alarms.create('aida-ts-proactive-refresh', { periodInMinutes: 15 });
+// Проактивный refresh 123LB cookie-сессии — каждые 25 мин (TTL 30 мин).
+chrome.alarms.create('aida-123lb-proactive-refresh', { periodInMinutes: 25 });
 // Keep-alive для SSE создаётся внутри DatAdapter._startSSE() / _stopSSE()
 
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -805,6 +812,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
     // TruckerPath auto-refresh (60 сек)
     if (alarm.name === 'aida-tp-refresh') {
         TruckerpathAdapter.handleAlarm().catch(e => console.warn('[AIDA/Core] TP auto-refresh error:', e.message));
+    }
+    // 123LB auto-refresh (загрузы)
+    if (alarm.name === 'aida-123lb-refresh') {
+        LB123Adapter.handleAlarm().catch(e => console.warn('[AIDA/Core] 123LB auto-refresh error:', e.message));
     }
     if (alarm.name === 'aida-ts-proactive-refresh') {
         // Проактивно обновляем JWT Truckstop пока он ещё валидный
@@ -824,6 +835,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
             }
         })();
     }
+    // Проактивный refresh 123LB cookie-сессии
+    if (alarm.name === 'aida-123lb-proactive-refresh') {
+        Auth123LB.handleAlarmRefresh().catch(e => console.warn('[AIDA/Core] 123LB proactive refresh error:', e.message));
+    }
     // keep-alive: просто пробуждает SW; SSE fetch stream продолжит работу
 });
 
@@ -836,7 +851,7 @@ async function init() {
 
     // Проактивный refresh токенов всех connected бордов при старте (§18 ТЗ)
     try {
-        const boards = ['truckstop', 'dat', 'tp'];
+        const boards = ['truckstop', 'dat', 'tp', '123lb'];
         for (const board of boards) {
             const adapter = ADAPTERS[board]?.module;
             if (adapter?.getStatus) {

@@ -2017,7 +2017,7 @@ function updateAgentStatus() {
  *  Клик = toggle.
  */
 function updateBoardDots() {
-    const boards = ['dat', 'truckstop', 'tp'];
+    const boards = ['dat', 'truckstop', 'tp', '123lb'];
     for (const board of boards) {
         const btn = document.getElementById(`board-btn-${board}`);
         if (!btn) continue;
@@ -2064,22 +2064,25 @@ async function refreshLoads() {
 
 function updateStatusBar() {
     // Счётчики по бордам
-    const boards = { dat: 0, truckstop: 0, tp: 0 };
+    const boards = { dat: 0, truckstop: 0, tp: 0, '123lb': 0 };
     let total = 0;
     for (const l of state.loads) {
         total++;
         if (l.board === 'dat') boards.dat++;
         else if (l.board === 'truckstop') boards.truckstop++;
         else if (l.board === 'tp' || l.board === 'truckerpath') boards.tp++;
+        else if (l.board === '123lb') boards['123lb']++;
     }
 
     // Обновить счётчики в board-toggle кнопках
     const datBtn = document.getElementById('board-btn-dat');
     const tsBtn = document.getElementById('board-btn-truckstop');
     const tpBtn = document.getElementById('board-btn-tp');
+    const lbBtn = document.getElementById('board-btn-123lb');
     if (datBtn) datBtn.querySelector('.board-label').textContent = `DAT ${boards.dat || ''}`;
     if (tsBtn) tsBtn.querySelector('.board-label').textContent = `Truckstop ${boards.truckstop || ''}`;
     if (tpBtn) tpBtn.querySelector('.board-label').textContent = `TruckerPath ${boards.tp || ''}`;
+    if (lbBtn) lbBtn.querySelector('.board-label').textContent = `123LB ${boards['123lb'] || ''}`;
 
     // Общий счётчик
     const countEl = document.getElementById('status-count');
