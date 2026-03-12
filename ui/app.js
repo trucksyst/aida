@@ -91,7 +91,7 @@ const ALL_COLUMNS = {
     mc: { label: 'MC#', sortKey: 'mc', cls: '', render: l => l.broker?.mc || '—' },
     rating: { label: 'Rating', sortKey: 'rating', cls: '', render: l => l.broker?.rating != null ? String(l.broker.rating) : '—' },
     daysToPay: { label: 'DTP', sortKey: 'daysToPay', cls: '', render: l => l.broker?.daysToPay != null ? `${l.broker.daysToPay}d` : '—' },
-    board: { label: 'Board', sortKey: 'board', cls: 'td-board', render: l => { const b = (l.board || '').toLowerCase(); const iconMap = { dat: 'icons/dat.png', truckstop: 'icons/truckstop.jpg', ts: 'icons/truckstop.jpg', tp: 'icons/tp.webp' }; const src = iconMap[b]; return src ? `<img class="board-icon board-icon--${b}" src="${src}" alt="${esc(l.board || '')}" title="${esc(l.board || '')}">` : `<span class="board-badge ${esc(b)}">${(l.board || '').toUpperCase()}</span>`; } },
+    board: { label: 'Board', sortKey: 'board', cls: 'td-board', render: l => { const b = (l.board || '').toLowerCase(); const iconMap = { dat: 'icons/dat.png', truckstop: 'icons/truckstop.jpg', ts: 'icons/truckstop.jpg', tp: 'icons/tp.webp', '123lb': 'icons/123lb.jpg' }; const src = iconMap[b]; return src ? `<img class="board-icon board-icon--${b}" src="${src}" alt="${esc(l.board || '')}" title="${esc(l.board || '')}">` : `<span class="board-badge ${esc(b)}">${(l.board || '').toUpperCase()}</span>`; } },
     posted: { label: 'Posted', sortKey: 'postedAt', cls: 'td-posted', render: l => formatPostedAgo(l.postedAt) },
     pickupDate: { label: 'Pickup', sortKey: 'pickupDate', cls: '', render: l => formatPickupWindow(l.pickupDate, l.pickupDateEnd) },
     status: { label: 'Status', sortKey: 'status', cls: '', render: l => renderStatusBadge(l.status) },

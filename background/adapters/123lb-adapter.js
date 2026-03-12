@@ -56,6 +56,14 @@ const EQUIP_DISPLAY = {
     'LANDOLL': 'Landoll', 'MAXI': 'Maxi',
 };
 
+/** Аббревиатуры контракта: AIDA key → короткий код (единый для всех бордов). */
+const EQUIP_ABBR = {
+    'VAN': 'V', 'REEFER': 'R', 'FLATBED': 'F', 'STEPDECK': 'SD',
+    'DOUBLEDROP': 'DD', 'LOWBOY': 'LB', 'RGN': 'RG', 'HOPPER': 'HB',
+    'TANKER': 'T', 'POWERONLY': 'PO', 'CONTAINER': 'C', 'DUMP': 'DT',
+    'AUTOCARRIER': 'AC', 'LANDOLL': 'LA', 'MAXI': 'MX',
+};
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -147,9 +155,9 @@ function normalizeLoad(raw) {
             lng: raw.destinationLocation?.geolocation?.longitude || null,
         },
 
-        equipment: aidaEquip,
+        equipment: EQUIP_ABBR[aidaEquip] || aidaEquip,
         equipmentName: EQUIP_DISPLAY[aidaEquip] || firstEquip,
-        equipmentAll: equipments.map(e => mapEquipFromLB(e.equipmentType)),
+        equipmentAll: equipments.map(e => { const k = mapEquipFromLB(e.equipmentType); return EQUIP_ABBR[k] || k; }),
         weight: raw.weight || null,
         length: raw.length || null,
         fullPartial,

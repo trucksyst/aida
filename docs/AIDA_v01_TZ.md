@@ -387,9 +387,9 @@ Core вызывает методы через registry: `ADAPTERS[board].module.
   },
 
   // === Груз ===
-  equipment:     string,          // 'VAN' | 'FLATBED' | 'STEPDECK' | 'REEFER' ...
-  equipmentName: string,          // полное название (Removable Goose Neck...)
-  equipmentAll:  string[],        // все типы если несколько
+  equipment:     string,          // аббревиатура: 'V' | 'R' | 'F' | 'SD' | 'DD' | 'LB' | 'RG' | 'HB' | 'T' | 'PO' | 'C' | 'DT' | 'AC' | 'LA' | 'MX'
+  equipmentName: string,          // полное название (Auto Carrier, Step Deck...)
+  equipmentAll:  string[],        // все типы если несколько (аббревиатуры)
   weight:        number | null,   // lbs
   length:        number | null,   // ft
   fullPartial:   string,          // 'FULL' | 'PARTIAL' | ''

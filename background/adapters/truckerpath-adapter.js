@@ -38,6 +38,14 @@ const EQUIP_MAP = {
     // MAXI — нет в TP, пропускаем
 };
 
+/** Маппинг сырых TP equipment → AIDA аббревиатура (контрактная). */
+const TP_EQUIP_ABBR = {
+    'VAN': 'V', 'REEFER': 'R', 'FLATBED': 'F', 'STEPDECK': 'SD',
+    'DOUBLE DROP': 'DD', 'LOWBOY': 'LB', 'HOPPER BOTTOM': 'HB',
+    'TANKER': 'T', 'POWER ONLY': 'PO', 'CONTAINERS': 'C',
+    'DUMP TRAILER': 'DT', 'AUTO CARRIER': 'AC',
+};
+
 /** Маппинг AIDA equipment → TP API keys (массив строк для query). */
 function mapEquipment(params) {
     if (!params?.equipment) return [];
@@ -177,8 +185,9 @@ function mapRowToLoad(row, idx, params) {
     const rate = parseNumber(row.price_total || row.price || row.rate);
     const rpm = miles && rate ? Math.round((rate / miles) * 100) / 100 : null;
     const equipRaw = row.equipment;
-    const equipmentAll = Array.isArray(equipRaw) ? equipRaw.map(e => typeof e === 'string' ? e.toUpperCase() : '').filter(Boolean) : [];
-    const equipment = equipmentAll[0] || (params?.equipment?.[0]) || 'VAN';
+    const equipmentAll = Array.isArray(equipRaw) ? equipRaw.map(e => { const k = typeof e === 'string' ? e.toUpperCase().trim() : ''; return TP_EQUIP_ABBR[k] || k; }).filter(Boolean) : [];
+    const rawEq = (Array.isArray(equipRaw) && equipRaw[0]) ? String(equipRaw[0]).toUpperCase().trim() : (params?.equipment?.[0] || 'VAN');
+    const equipment = TP_EQUIP_ABBR[rawEq] || rawEq;
     const deadhead = row.pickup && typeof row.pickup.deadhead === 'number' ? row.pickup.deadhead : null;
 
     // === Broker ===
@@ -211,7 +220,7 @@ function mapRowToLoad(row, idx, params) {
         externalId: String(row.external_id || row.shipment_id || ''),
         origin,
         destination,
-        equipment: String(equipment || 'VAN').trim().toUpperCase(),
+        equipment: equipment || 'V',
         equipmentName: '',
         equipmentAll,
         weight,
