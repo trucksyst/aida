@@ -352,7 +352,10 @@ function buildGraphQLRequest(params, originPlace, destPlace) {
                 latestWhen: str(params.dateTo || params.dateFrom) || undefined
             }
             : undefined,
-        capacity: { fullPartial: 'BOTH' },
+        capacity: {
+            fullPartial: 'BOTH',
+            ...(params.maxWeight > 0 ? { maximumWeightPounds: params.maxWeight } : {})
+        },
         orderBy: 'AGE_ASC',
         limit: 150,
         countsOnly: false,

@@ -392,7 +392,9 @@ const TruckerpathAdapter = {
                 chr_switch: false
             },
             query: {
-                weight: { allow_null: true },
+                weight: params.maxWeight > 0
+                    ? { max: params.maxWeight, allow_null: true }
+                    : { allow_null: true },
                 length: { allow_null: true },
                 pickup: {
                     geo: {

@@ -544,7 +544,8 @@ function buildPresetFromForm() {
         radius: parseInt(document.getElementById('search-radius').value) || 50,
         dest: document.getElementById('dest-city').value.trim(),
         equipment: getSelectedEquipment(),
-        dateWindow
+        dateWindow,
+        maxWeight: parseInt(document.getElementById('max-weight').value) || 0
     };
 }
 
@@ -555,6 +556,7 @@ function presetExists(p) {
         x.dest === p.dest &&
         x.radius === p.radius &&
         (x.dateWindow ?? 3) === (p.dateWindow ?? 3) &&
+        (x.maxWeight || 0) === (p.maxWeight || 0) &&
         JSON.stringify(x.equipment.slice().sort()) === JSON.stringify(p.equipment.slice().sort())
     );
 }
@@ -591,6 +593,7 @@ function applyPreset(presetId) {
     setVal('search-radius', p.radius != null ? p.radius : 50);
     setVal('dest-city', p.dest || '');
     if (p.equipment) setEquipmentChecked(p.equipment);
+    setVal('max-weight', p.maxWeight || '');
 
     // Даты: today → today + dateWindow (относительное окно)
     const window = p.dateWindow ?? 3;
@@ -995,7 +998,8 @@ function getSearchParams() {
         destRadius: parseInt(document.getElementById('dest-radius').value) || 150,
         equipment: getSelectedEquipment(),
         dateFrom: document.getElementById('date-from').value,
-        dateTo: document.getElementById('date-to').value
+        dateTo: document.getElementById('date-to').value,
+        maxWeight: parseInt(document.getElementById('max-weight').value) || 0
     };
 }
 

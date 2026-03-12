@@ -552,7 +552,10 @@ const TruckstopAdapter = {
         const eqIds = getEquipmentIds(params);
         if (eqIds) {
             args.equipment_ids = eqIds;
-
+        }
+        // Weight filter
+        if (params.maxWeight > 0) {
+            args.max_weight = params.maxWeight;
         }
 
         const body1 = JSON.stringify({
@@ -701,6 +704,8 @@ const TruckstopAdapter = {
         // Equipment IDs
         const eqIds = getEquipmentIds(params);
         if (eqIds) args.equipment_ids = eqIds;
+        // Weight filter
+        if (params.maxWeight > 0) args.max_weight = params.maxWeight;
 
         const body = JSON.stringify({
             operationName: 'LoadSearchSortByUpdatedOnDesc',

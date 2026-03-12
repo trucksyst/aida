@@ -272,6 +272,10 @@ body {
     width: 55px;
 }
 
+.search-field.field-weight input {
+    width: 70px;
+}
+
 .search-field.field-dest input {
     width: 160px;
 }
@@ -819,24 +823,7 @@ body {
     opacity: 0.7;
 }
 
-/* Каскад свежести: wave-0 — самые новые (яркий синий), wave-1 — предыдущая волна (бледный) */
-#load-table tbody tr.wave-0 {
-    background: rgba(31, 111, 235, 0.15);
-    transition: background 1s ease;
-}
-
-#load-table tbody tr.wave-1 {
-    background: rgba(31, 111, 235, 0.06);
-    transition: background 1s ease;
-}
-
-[data-theme="light"] #load-table tbody tr.wave-0 {
-    background: rgba(31, 111, 235, 0.12);
-}
-
-[data-theme="light"] #load-table tbody tr.wave-1 {
-    background: rgba(31, 111, 235, 0.04);
-}
+/* Каскад свежести: отключён (wave-0/wave-1 фон убран, лейбл NEW остаётся) */
 
 #load-table td {
     padding: 6px 8px;
