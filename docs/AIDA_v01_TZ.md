@@ -350,6 +350,7 @@ const ADAPTERS = {
     dat:       { module: DatAdapter,         displayName: 'DAT',         hasAuthModule: true  },
     truckstop: { module: TruckstopAdapter,   displayName: 'Truckstop',   hasAuthModule: true  },
     tp:        { module: TruckerpathAdapter,  displayName: 'TruckerPath', hasAuthModule: false },
+    '123lb':   { module: LB123Adapter,       displayName: '123LB',       hasAuthModule: true  },
 };
 ```
 
@@ -366,7 +367,7 @@ Core вызывает методы через registry: `ADAPTERS[board].module.
 {
   // === Идентификация ===
   id:            string,          // уникальный ID (boardPrefix + originalId)
-  board:         'dat'|'ts'|'tp', // источник
+  board:         'dat'|'ts'|'tp'|'123lb', // источник
   externalId:    string,          // ID на борде
 
   // === Origin ===
@@ -1027,6 +1028,177 @@ aida/
 ### Подробный план реализации
 
 См. `docs/PLAN_profile_sync.md`
+
+---
+
+## 19. 123LoadBoard — интеграция (v0.1.86)
+
+**Четвёртый лоадборд.** REST API на `members.123loadboard.com/api/`. Cookie-based авторизация (HttpOnly). HAR-анализ: `log.members.123loadboard.com.har`, `login.123loadboard.com.har`, `serg.members.123loadboard.com.har`, `load.members.123loadboard.com.har`.
+
+### 19.1 Авторизация
+
+- **Метод:** HttpOnly cookies (не Bearer token). HAR не записывает cookies — они устанавливаются браузером автоматически.
+- **Логин:** POST-форма `login.123loadboard.com/` — поля `Email`, `Password`, `isRememberMe`, `RedirectLink`. Также OAuth (Google, Facebook, Apple) через `provider` + `ticket` hidden fields.
+- **Refresh:** `POST /refreshToken?rnd={random}` — body `{}`, response `{secondsToExpire: 1799}` (~30 мин TTL).
+- **Custom headers (обязательные):**
+  - `123LB-Api-Version: 1.3`
+  - `123LB-BID: {session_id}` (генерируется клиентом, напр. `B3PVoSo1UwD9a`)
+  - `123LB-Correlation-Id: {random}` (трекинг запроса)
+  - `123LB-MEM-User-Version: 3.116.1` (версия web-приложения)
+  - `Content-Type: application/json`
+  - `Accept: application/json`
+
+### 19.2 API Endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/api/loads/search` | POST | Прямой поиск грузов (без named search) |
+| `/api/loads/search/metadata` | POST | Только количество совпадений |
+| `/api/loads/named-searches` | POST | Создать named search → получить `id` |
+| `/api/loads/named-searches/{id}/search` | POST | Выполнить поиск по named search ID |
+| `/api/loads/named-searches` | GET | Список сохранённых поисков |
+| `/api/loads/{id}?fields=...&onlineOnly=true` | GET | Детали груза (контакт, мили, notes) |
+| `/api/loads/search/similar` | POST | Похожие грузы |
+| `/api/loads/ratecheck` | POST | Рейтчек (массив ID) |
+| `/api/loads/{id}/backhauls` | GET | Обратные грузы |
+| `/api/loads/{id}/routemap` | GET | Карта маршрута (изображение) |
+| `/api/profile` | GET | Профиль пользователя |
+| `/api/settings/loadsearch` | GET | Настройки поиска (домашний город, радиус) |
+| `/api/refreshToken?rnd={random}` | POST | Обновление сессии |
+
+### 19.3 Поиск грузов — flow
+
+**Вариант A: Прямой поиск** (рекомендуется для AIDA)
+```
+POST /api/loads/search
+Body: {
+  origin: { states: ["IL"], city: "Chicago", longitude: -87.63, latitude: 41.88, radius: 200, type: "City" },
+  destination: { type: "Anywhere" },
+  equipmentTypes: ["Van", "Reefer", "Flatbed"],
+  metadata: { type: "Regular", limit: 50, fields: "all", sortBy: { field: "Origin", direction: "Ascending" } },
+  pickupDates: [],
+  includeLoadsWithoutLength: true,
+  includeLoadsWithoutWeight: true,
+  minWeight: 0, minLength: 0,
+  company: { types: "All" }
+}
+```
+
+**Refresh (polling):** тот же endpoint, но `type: "Refresh"` + `nextToken` из предыдущего response metadata.
+
+**Детали груза:** `GET /api/loads/{id}?fields=id,guid,status,computedMileage,...,dispatchPhone,dispatchName,dispatchEmail,contactName,contactPhone,contactEmail,...&onlineOnly=true` — возвращает контактную информацию, мили, полные notes.
+
+### 19.4 Equipment mapping (123LB ↔ AIDA)
+
+| AIDA ключ | 123LB API строка | UI-метка AIDA |
+|-----------|-----------------|---------------|
+| `VAN` | `Van` | Van (V) |
+| `REEFER` | `Reefer` | Reefer (R) |
+| `FLATBED` | `Flatbed` | Flatbed (F) |
+| `STEPDECK` | `StepDeck` | Step Deck (SD) |
+| `DOUBLEDROP` | `DoubleDrop` | Double Drop (DD) |
+| `LOWBOY` | `LowBoy` | Lowboy (LB) |
+| `RGN` | `RemovableGooseneck` | RGN (RG) |
+| `HOPPER` | `HopperBottom` | Hopper Bottom (HB) |
+| `TANKER` | `Tanker` | Tanker (T) |
+| `POWERONLY` | `PowerOnly` | Power Only (PO) |
+| `CONTAINER` | `Container` | Container (C) |
+| `DUMP` | `DumpTruck` | Dump Trailer (DT) |
+| `AUTOCARRIER` | `Auto` | Auto Carrier (AC) |
+| `LANDOLL` | `Landoll` | Landoll (LA) |
+| `MAXI` | `Maxi` | Maxi (MX) |
+
+> **Примечание:** 123LB имеет дополнительные типы (BoxTruck, HotShot, Conestoga, Intermodal, BTrain, MovingVan, Sprinter, CargoVan, AnimalCarrier, BoatHauler, HeavyHaulers, MiniVan, PilotCars) — в AIDA не добавляются, обратный маппинг не нужен. DumpTruck и Dump Trailer — одно и то же.
+
+### 19.5 Data contract mapping (123LB → AIDA)
+
+| AIDA | 123LB Search | 123LB Detail (GET /loads/{id}) |
+|------|-------------|-------------------------------|
+| `id` | `"123lb_" + id` | — |
+| `externalId` | `postReference` | — |
+| `origin.city/state` | `originLocation.address.city/state` | ✅ |
+| `origin.lat/lng` | `originLocation.geolocation.latitude/longitude` | ✅ (более точные) |
+| `dest.city/state` | `destinationLocation.address.city/state` | ✅ |
+| `dest.lat/lng` | `destinationLocation.geolocation.latitude/longitude` | ✅ |
+| `equipment` | `equipments[0].equipmentType` (маппинг §19.4) | ✅ |
+| `equipmentAll` | `equipments[].equipmentType` | ✅ |
+| `weight` | `weight` (lbs) | ✅ |
+| `length` | `length` (ft) | ✅ |
+| `fullPartial` | `loadSize`: `"TL"→"FULL"`, `"LTL"→"PARTIAL"` | — |
+| `miles` | ❌ | `computedMileage` |
+| `deadhead` | `metadata.userdata.originDeadhead.value` (miles) | — |
+| `rate` | `rate.amount` | ✅ |
+| `rpm` | rate ÷ miles (вычисляется) | — |
+| `broker.company` | `poster.name` | ✅ (+ `poster.address`) |
+| `broker.phone` | ❌ | `dispatchPhone.number` или `poster.phone.number` |
+| `broker.email` | ❌ | `dispatchEmail` |
+| `broker.mc` | `poster.docketNumber` (prefix+number) | ✅ |
+| `broker.address` | ❌ | `poster.address.city + state` |
+| `notes` | `commodity` (краткое) | `notes` (полные) + `commodity` |
+| `pickupDate` | `pickupDates[0]` (ISO date) | ✅ |
+| `pickupDateEnd` | `pickupDates[last]` | — |
+| `postedAt` | `created` (RFC datetime) | ✅ |
+| `status` | `status` = `"Online"` → `"active"` | ✅ |
+| `bookNow` | ❌ | `canBookNow` |
+| `broker.rating` | ❌ | ❌ (платная фича) |
+| `broker.daysToPay` | ❌ | ❌ (платная фича) |
+
+> **Обогащение:** phone, email, miles, notes доступны только через GET /loads/{id}. Адаптер делает batch-запросы на детали после основного поиска (аналогично Truckstop `_enrichLoads`).
+
+### 19.6 Storage keys
+
+```
+auth:123lb:meta         — { issuedAt, expiresAt, source, bid }
+auth:123lb:search       — { namedSearchId, nextToken, lastRefreshTime }
+```
+
+### 19.7 Auth module (auth-123lb.js)
+
+| Метод | Описание |
+|-------|----------|
+| `login()` | Popup → `login.123loadboard.com/?rd=members.123loadboard.com` → мониторинг `tabs.onUpdated` → redirect на `members.123loadboard.com` → resolve |
+| `silentRefresh()` | `POST /refreshToken` → обновить `expiresAt` в storage |
+| `getToken()` | Проверить expiresAt → silentRefresh если нужно → вернуть `{ ok: true }` |
+| `getStatus()` | `{ connected, status, hasToken, hasAuthModule: true }` |
+| `disconnect()` | `chrome.cookies.remove()` для `members.123loadboard.com` |
+
+**Особенность:** 123LB не использует Bearer token. API вызовы из background.js должны проходить через контекст в котором есть cookies для `members.123loadboard.com`. Это работает если cookies не HttpOnly — тогда `fetch()` из service worker подхватит их автоматически. Если cookies HttpOnly — потребуется `chrome.cookies` API для проверки статуса.
+
+### 19.8 Adapter (123lb-adapter.js)
+
+| Метод | Описание |
+|-------|----------|
+| `search(params)` | POST /api/loads/search → normalize → enrich (batch GET /loads/{id}) |
+| `refreshNew(params)` | POST с `type:"Refresh"` + `nextToken` → новые/обновлённые грузы |
+| `setRealtimeCallback(fn)` | Polling через chrome.alarms (аналогично Truckstop) |
+| `getStatus/login/disconnect()` | Делегирует в Auth123LB |
+
+### 19.9 UI изменения
+
+- **Footer status bar:** Добавить кнопку `board-btn-123lb` (data-board="123lb") — 4я кнопка, с такой же логикой toggle/connect/disconnect как DAT/TS/TP.
+- **`updateBoardDots()`:** добавить `'123lb'` в массив boards.
+- **`updateStatusBar()`:** добавить подсчёт `boards['123lb']`.
+- **Adapter Registry:** `123lb: { module: LB123Adapter, displayName: '123LB', hasAuthModule: true }`.
+
+### 19.10 Manifest.json
+
+Добавить в `host_permissions`:
+```json
+"https://members.123loadboard.com/*",
+"https://login.123loadboard.com/*"
+```
+
+### 19.11 Файловая структура
+
+```
+background/
+  auth/auth-123lb.js           — Auth модуль
+  adapters/123lb-adapter.js    — Adapter
+ui/
+  app.html                     — кнопка board-btn-123lb в footer
+  app.js                       — updateBoardDots + updateStatusBar + boards counter
+manifest.json                  — host_permissions
+```
 
 ---
 
