@@ -217,8 +217,8 @@ function mapRowToLoad(row, idx, params) {
         weight,
         length: typeof row.length === 'number' && row.length > 0 ? row.length : null,
         fullPartial: (row.load_size || '').toUpperCase(),
-        miles,
-        deadhead,
+        miles: typeof miles === 'number' ? Math.round(miles) : null,
+        deadhead: typeof deadhead === 'number' ? Math.round(deadhead) : null,
         rate,
         rpm,
         broker: {
@@ -419,7 +419,6 @@ const TruckerpathAdapter = {
 
         // Destination (если указан)
         if (params.destination?.city) {
-            // Destination геокодинг будет добавлен позже если нужен
             body.query.drop_off = {
                 geo: {
                     deadhead: { max: Number(params.radius) || 200 }

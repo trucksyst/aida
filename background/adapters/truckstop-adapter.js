@@ -353,8 +353,8 @@ function normalizeTruckstopRaw(raw) {
         weight: typeof w === 'number' ? w : (typeof w === 'string' ? parseFloat(w) : null),
         length: typeof raw.dimensionsLength === 'number' && raw.dimensionsLength > 0 ? raw.dimensionsLength : null,
         fullPartial: '',
-        miles: milesNum,
-        deadhead: typeof raw.originDeadhead === 'number' ? raw.originDeadhead : null,
+        miles: typeof milesNum === 'number' ? Math.round(milesNum) : null,
+        deadhead: typeof raw.originDeadhead === 'number' ? Math.round(raw.originDeadhead) : null,
         rate: rateNum,
         rpm,
         broker: {
@@ -548,7 +548,7 @@ const TruckstopAdapter = {
             d.setDate(d.getDate() + 45);
             args.pickup_date_end = d.toISOString().slice(0, 10);
         }
-        // Equipment IDs (подтверждено introspection: equipment_ids: _int4)
+        // Equipment IDs
         const eqIds = getEquipmentIds(params);
         if (eqIds) {
             args.equipment_ids = eqIds;

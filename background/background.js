@@ -63,12 +63,6 @@ const AIDA_UI_URL = chrome.runtime.getURL('ui/app.html');
 const BUILD = chrome.runtime.getManifest().version;
 console.log(`%c[AIDA] build ${BUILD}`, 'color:#0f0;font-weight:bold;font-size:14px;background:#222;padding:2px 8px;border-radius:4px');
 
-/* Дедупликация отключена — удаляла грузы с одинаковым city+date при пустом phone */
-
-/** Cooldown (мс) после searchLoads — игнорируем harvester intercepts, чтобы не перезаписать результаты AIDA search. */
-const SEARCH_COOLDOWN_MS = 10_000;
-let _searchCooldownUntil = 0;
-
 /** Проверить, открыта ли вкладка борда. */
 async function isBoardTabOpen(board) {
     const patterns = {
@@ -489,7 +483,6 @@ async function searchLoads(params) {
 
     await Storage.clearActive();
     await Storage.setLoads(loads);
-    _searchCooldownUntil = Date.now() + SEARCH_COOLDOWN_MS;
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });

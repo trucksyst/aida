@@ -276,6 +276,18 @@ body {
     width: 70px;
 }
 
+/* Убрать стрелки у number-инпутов (radius, weight) */
+.search-field input[type="number"]::-webkit-inner-spin-button,
+.search-field input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.search-field input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
 .search-field.field-dest input {
     width: 160px;
 }
@@ -823,7 +835,8 @@ body {
     opacity: 0.7;
 }
 
-/* Каскад свежести: отключён (wave-0/wave-1 фон убран, лейбл NEW остаётся) */
+
+
 
 #load-table td {
     padding: 6px 8px;

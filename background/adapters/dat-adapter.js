@@ -514,8 +514,8 @@ function normalize(raw) {
         weight: cap.maximumWeightPounds || null,
         length: cap.maximumLengthFeet || null,
         fullPartial: (cap.fullPartial || '').toUpperCase(),
-        miles,
-        deadhead: deadheadObj.miles ?? null,
+        miles: typeof miles === 'number' ? Math.round(miles) : null,
+        deadhead: typeof deadheadObj.miles === 'number' ? Math.round(deadheadObj.miles) : null,
         rate: rateUsd,
         rpm: miles && rateUsd ? Math.round((rateUsd / miles) * 100) / 100 : null,
         broker: {

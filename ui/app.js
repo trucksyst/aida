@@ -33,9 +33,6 @@ const state = {
     colWidths: {},       // column key → width in px (persisted)
 };
 
-/** Каскад свежести: Map<loadId, waveLevel> (0 = самые новые, 1 = предыдущая волна) */
-const _waveMap = new Map();
-
 /** Форматирование телефона: +1(XXX)XXX-XXXX ext.123 для US/CA */
 function formatPhone(raw, ext) {
     if (!raw) return '—';
@@ -83,11 +80,11 @@ const ALL_COLUMNS = {
             return `<strong>${esc(o)}</strong> <span class="route-arrow">→</span> <strong>${esc(d)}</strong>`;
         }
     },
-    miles: { label: 'Miles', sortKey: 'miles', cls: '', render: l => l.miles ? `${Math.round(l.miles).toLocaleString()}` : '—' },
+    miles: { label: 'Miles', sortKey: 'miles', cls: '', render: l => l.miles ? `${l.miles.toLocaleString()}` : '—' },
     weight: { label: 'Weight', sortKey: 'weight', cls: '', render: l => l.weight ? `${(l.weight / 1000).toFixed(0)}k lbs` : '—' },
     length: { label: 'Length', sortKey: 'length', cls: '', render: l => l.length ? `${l.length} ft` : '—' },
     fullPartial: { label: 'F/P', sortKey: 'fullPartial', cls: '', render: l => l.fullPartial || '—' },
-    deadhead: { label: 'DH mi', sortKey: 'deadhead', cls: '', render: l => l.deadhead ? `${Math.round(l.deadhead)}` : '—' },
+    deadhead: { label: 'DH mi', sortKey: 'deadhead', cls: '', render: l => l.deadhead ? `${l.deadhead}` : '—' },
     broker: { label: 'Broker', sortKey: 'broker', cls: '', render: l => esc(l.broker?.company || '—') },
     phone: { label: 'Phone', sortKey: 'phone', cls: '', render: l => l.broker?.phone ? formatPhone(l.broker.phone, l.broker?.phoneExt) : '—' },
     email: { label: 'Email', sortKey: 'email', cls: '', render: l => l.broker?.email ? esc(l.broker.email) : '—' },
@@ -107,22 +104,6 @@ const FULL_COLUMN_ORDER = ['rate', 'rpm', 'equipment', 'route', 'miles', 'weight
 
 /** Столбцы видимые по умолчанию */
 const DEFAULT_COLUMNS = ['rate', 'rpm', 'equipment', 'route', 'miles', 'weight', 'broker', 'board', 'posted', 'status'];
-
-/** Обновить волны на основе newLoadIds от Core (только реально новые грузы из auto-refresh). */
-function updateWavesFromCore(newLoadIds) {
-    // Сдвигаем существующие волны: 0→1, 1→удалить
-    for (const [id, wave] of _waveMap) {
-        if (wave >= 1) {
-            _waveMap.delete(id);
-        } else {
-            _waveMap.set(id, wave + 1);
-        }
-    }
-    // Новые ID от Core → wave 0
-    for (const id of newLoadIds) {
-        _waveMap.set(id, 0);
-    }
-}
 
 const MAX_PRESETS = 8;
 
@@ -255,6 +236,7 @@ function applyLastSearch(lastSearch) {
         const eqArr = Array.isArray(lastSearch.equipment) ? lastSearch.equipment : [lastSearch.equipment];
         setEquipmentChecked(eqArr);
     }
+    if (lastSearch.maxWeight > 0) setVal('max-weight', lastSearch.maxWeight);
     // Даты: окно 3 дня LOCAL (не UTC — иначе вечером в CST/EST дата +1)
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -274,10 +256,6 @@ function onDataUpdated(message) {
     const p = message.payload;
     let updated = [];
     if (p.loads !== undefined) {
-        // Каскад свежести: только по newLoadIds от Core (реально новые из auto-refresh)
-        if (Array.isArray(p.newLoadIds) && p.newLoadIds.length > 0) {
-            updateWavesFromCore(p.newLoadIds);
-        }
         state.loads = p.loads;
         updated.push('loads');
         renderTable();
@@ -939,7 +917,7 @@ async function doSearch() {
     showTableEmpty(false);
     showTableLoading(true);
     _hasMoreLoads = true; // сброс пагинации
-    _waveMap.clear();     // сброс каскада свежести
+
 
     try {
 
@@ -1162,10 +1140,7 @@ function formatPickupWindowLong(start, end) {
 
 
 function renderRow(load) {
-    // Каскад свежести: wave-0 (яркий) / wave-1 (бледный) / обычный
-    const wave = _waveMap.get(load.id);
-    const waveClass = wave === 0 ? ' wave-0' : (wave === 1 ? ' wave-1' : '');
-    const rowClass = `status-${load.status || 'active'}${waveClass}`;
+    const rowClass = `status-${load.status || 'active'}`;
 
     const cells = state.columns.map(key => {
         const col = ALL_COLUMNS[key];
@@ -1675,7 +1650,7 @@ function renderDetailContent(load) {
         ${detailRow('Miles', load.miles ? `${load.miles.toLocaleString()} mi` : '—')}
         ${detailRow('Weight', load.weight ? `${load.weight.toLocaleString()} lbs` : '—')}
         ${detailRow('Length', load.length ? `${load.length} ft` : '—')}
-        ${detailRow('Deadhead', load.deadhead ? `${Math.round(load.deadhead)} mi` : '—')}
+        ${detailRow('Deadhead', load.deadhead ? `${load.deadhead} mi` : '—')}
         ${detailRow('Full/Partial', load.fullPartial || '—')}
         ${detailRow('Pickup window', formatPickupWindowLong(load.pickupDate, load.pickupDateEnd))}
         ${detailRow('Board', (load.board || '').toUpperCase())}
@@ -1958,7 +1933,7 @@ function renderCallCard(load, context) {
         <div class="call-card-broker">${esc(load.broker?.company || load.broker?.name || '—')}</div>
         <div class="call-card-meta">
             <span>${rate}</span>
-            <span>${load.miles ? `${load.miles} mi` : ''}</span>
+            <span>${load.miles ? `${load.miles.toLocaleString()} mi` : ''}</span>
             <span class="board-badge ${load.board}">${(load.board || '').toUpperCase()}</span>
         </div>
     </div>`;
