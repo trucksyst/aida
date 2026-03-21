@@ -31,6 +31,13 @@ const state = {
     searchPresets: [],   // max 8 saved search presets
     columns: null,       // ordered column keys (loaded from storage)
     colWidths: {},       // column key → width in px (persisted)
+    chat: {
+        opened: false,
+        onboardingTried: false,
+        authPending: false,
+        authDenied: false,
+        lastAuthError: ''
+    }
 };
 
 /** Форматирование телефона: +1(XXX)XXX-XXXX ext.123 для US/CA */
@@ -197,6 +204,8 @@ function applySettings(settings) {
     state.boardStatus = settings.boardStatus || {};
     if (settings.theme) document.documentElement.dataset.theme = settings.theme;
     updateBoardDots();
+
+    refreshAiStatus();
 }
 
 function setVal(id, val) {
@@ -722,6 +731,7 @@ function bindEvents() {
     attachLocationAutocomplete('dest-city', 'dest-autocomplete');
     initEquipMultiSelect();
     initSearchPresets();
+    initChatWidget();
 
     // Sidebar navigation
     document.querySelectorAll('.sidebar-icon[data-section]').forEach(btn => {
@@ -2005,6 +2015,333 @@ function updateAgentStatus() {
         statusEl.textContent = 'Agent: off';
         statusEl.style.color = 'var(--text-secondary)';
         if (statusText) statusText.textContent = 'Off';
+    }
+}
+
+async function connectAiOauth(silent = false) {
+    console.log('[AIDA/UI Chat] connectAiOauth:start', { silent });
+    const resp = await sendToCore('AI_AUTH_CONNECT');
+    console.log('[AIDA/UI Chat] connectAiOauth:response', resp);
+    state.chat.lastAuthError = resp?.error || '';
+    if (resp?.ok) {
+        if (!silent) showToast('OAuth connected');
+    } else {
+        if (!silent) showToast(resp?.error || 'OAuth connect failed', 'error');
+    }
+    await refreshAiStatus();
+    return !!resp?.ok;
+}
+
+async function disconnectAiOauth() {
+    const resp = await sendToCore('AI_AUTH_DISCONNECT');
+    if (resp?.ok) {
+        showToast('OAuth disconnected');
+    } else {
+        showToast(resp?.error || 'OAuth disconnect failed', 'error');
+    }
+    await refreshAiStatus();
+}
+
+async function refreshAiStatus() {
+    const statusEl = document.getElementById('ai-status-text');
+    if (!statusEl) return;
+
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = 'var(--text-secondary)';
+
+    const resp = await sendToCore('GET_AI_STATUS');
+    const s = resp?.status;
+    console.log('[AIDA/UI Chat] refreshAiStatus:response', resp);
+
+    if (!s) {
+        statusEl.textContent = 'Unavailable';
+        statusEl.style.color = 'var(--danger)';
+        return;
+    }
+    if (!s.enabled) {
+        statusEl.textContent = 'Disabled';
+        statusEl.style.color = 'var(--text-secondary)';
+        return;
+    }
+    if (s.online) {
+        statusEl.textContent = `Online (${s.provider || 'gemini'})`;
+        statusEl.style.color = 'var(--success)';
+        return;
+    }
+
+    statusEl.textContent = `Offline: ${s.reason || 'unknown'}`;
+    statusEl.style.color = 'var(--danger)';
+}
+
+// ============================================================
+// AI Chat Widget
+// ============================================================
+
+function initChatWidget() {
+    const fab = document.getElementById('ai-chat-fab');
+    const panel = document.getElementById('ai-chat-panel');
+    const closeBtn = document.getElementById('ai-chat-close');
+    const sendBtn = document.getElementById('ai-chat-send');
+    const input = document.getElementById('ai-chat-input');
+    if (!fab || !panel || !closeBtn || !sendBtn || !input) return;
+
+    fab.addEventListener('click', async () => {
+        console.log('[AIDA/UI Chat] fab:click');
+        panel.classList.add('open');
+        panel.setAttribute('aria-hidden', 'false');
+        state.chat.opened = true;
+        state.chat.onboardingTried = false;
+        state.chat.authPending = false;
+        state.chat.authDenied = false;
+        state.chat.lastAuthError = '';
+
+        if (!document.getElementById('ai-chat-messages')?.children?.length) {
+            addChatMessage('assistant', 'Привет. Я AI-помощник AIDA. Напишите запрос на поиск, например: "найди reefer из Chicago в Atlanta".');
+        }
+
+        const ready = await ensureChatOnboarding();
+        console.log('[AIDA/UI Chat] fab:ensureChatOnboarding:done', { ready });
+        input.focus();
+    });
+
+    closeBtn.addEventListener('click', () => {
+        if (document.activeElement === closeBtn) closeBtn.blur();
+        panel.classList.remove('open');
+        panel.setAttribute('aria-hidden', 'true');
+    });
+
+    sendBtn.addEventListener('click', sendChatPrompt);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendChatPrompt();
+    });
+
+}
+
+function addChatMessage(role, text) {
+    const wrap = document.getElementById('ai-chat-messages');
+    if (!wrap) return;
+    const node = document.createElement('div');
+    node.className = `ai-msg ${role}`;
+    node.textContent = text;
+    wrap.appendChild(node);
+    wrap.scrollTop = wrap.scrollHeight;
+}
+
+function isOauthDeniedError(error) {
+    return /did not approve access/i.test(String(error || ''));
+}
+
+async function ensureChatOnboarding() {
+    console.log('[AIDA/UI Chat] ensureChatOnboarding:start');
+    return await syncChatAuthUi({ autoConnect: true });
+}
+
+async function syncChatAuthUi({ autoConnect = false } = {}) {
+    const authWrap = document.getElementById('ai-chat-auth');
+    const authText = document.getElementById('ai-chat-auth-text');
+    if (!authWrap || !authText) return;
+
+    console.log('[AIDA/UI Chat] syncChatAuthUi:start', {
+        autoConnect,
+        onboardingTried: state.chat.onboardingTried
+    });
+
+    if (state.chat.authPending) {
+        authWrap.style.display = '';
+        authText.textContent = 'Ожидаю завершения входа через Google...';
+        return false;
+    }
+
+    if (state.chat.authDenied) {
+        authWrap.style.display = '';
+        authText.textContent = 'Вход через Google отменен. Закройте и снова откройте чат для повтора.';
+        return false;
+    }
+
+    if (autoConnect && !state.chat.onboardingTried) {
+        state.chat.onboardingTried = true;
+        state.chat.authPending = true;
+        state.chat.lastAuthError = '';
+        authWrap.style.display = '';
+        authText.textContent = 'Подключаю Google авторизацию...';
+        addChatMessage('assistant', 'Открываю вход через Google...');
+        console.log('[AIDA/UI Chat] syncChatAuthUi:autoConnect:before-connect');
+        const ok = await connectAiOauth(true);
+        state.chat.authPending = false;
+        console.log('[AIDA/UI Chat] syncChatAuthUi:autoConnect:after-connect', { ok });
+        if (ok) {
+            state.chat.authDenied = false;
+            const fresh = await sendToCore('GET_SETTINGS');
+            console.log('[AIDA/UI Chat] syncChatAuthUi:autoConnect:fresh-settings', fresh);
+            if (fresh?.settings) {
+                state.settings = fresh.settings;
+                applySettings(fresh.settings);
+            }
+            authWrap.style.display = 'none';
+            addChatMessage('assistant', 'Вход выполнен. Можно отправлять запросы.');
+            return true;
+        } else {
+            if (isOauthDeniedError(state.chat.lastAuthError)) {
+                state.chat.authDenied = true;
+                authText.textContent = 'Вход через Google отменен. Закройте и снова откройте чат для повтора.';
+                addChatMessage('assistant', 'Вход через Google отменен. Для новой попытки заново откройте чат.');
+            } else {
+                const freshStatus = await sendToCore('GET_AI_STATUS');
+                if (freshStatus?.status?.reason === 'OAUTH_CLIENT_ID_MISSING') {
+                    authText.textContent = 'Сервис авторизации временно недоступен.';
+                } else {
+                    authText.textContent = 'Авторизация не завершена. Закройте и снова откройте чат для повтора.';
+                }
+            }
+            return false;
+        }
+    }
+
+    const statusResp = await sendToCore('GET_AI_STATUS');
+    const s = statusResp?.status;
+    console.log('[AIDA/UI Chat] syncChatAuthUi:status', statusResp);
+
+    if (!s) {
+        authWrap.style.display = '';
+        authText.textContent = 'Не удалось получить статус авторизации';
+        return false;
+    }
+
+    if (s.online) {
+        authWrap.style.display = 'none';
+        return true;
+    }
+
+    authWrap.style.display = '';
+    authText.textContent = 'Подключаю Google авторизацию...';
+
+    return false;
+}
+
+function normalizeSearchParamsFromAction(actionParams = {}) {
+    const current = getSearchParams();
+    const p = actionParams || {};
+
+    const originRaw = p.origin || p.from || current.origin;
+    const destRaw = p.destination || p.dest || p.to || current.destination;
+
+    const origin = typeof originRaw === 'string'
+        ? parseCityState(originRaw)
+        : { city: originRaw?.city || current.origin.city, state: originRaw?.state || current.origin.state };
+
+    const destination = typeof destRaw === 'string'
+        ? parseCityState(destRaw)
+        : { city: destRaw?.city || current.destination.city, state: destRaw?.state || current.destination.state };
+
+    const equipment = Array.isArray(p.equipment)
+        ? p.equipment
+        : (typeof p.equipment === 'string' && p.equipment ? [p.equipment] : current.equipment);
+
+    return {
+        ...current,
+        origin,
+        destination,
+        radius: Number(p.radius || current.radius || 50),
+        destRadius: Number(p.destRadius || current.destRadius || 150),
+        equipment: equipment.map(e => String(e).toUpperCase()),
+        dateFrom: p.dateFrom || current.dateFrom,
+        dateTo: p.dateTo || current.dateTo,
+        maxWeight: Number(p.maxWeight || current.maxWeight || 0)
+    };
+}
+
+function applySearchParamsToForm(params) {
+    setVal('origin-city', formatCityState(params.origin?.city || '', params.origin?.state || ''));
+    setVal('dest-city', formatCityState(params.destination?.city || '', params.destination?.state || ''));
+    setVal('search-radius', params.radius || 50);
+    setVal('dest-radius', params.destRadius || 150);
+    setVal('date-from', params.dateFrom || localDateStr());
+    setVal('date-to', params.dateTo || localDateStr());
+    setVal('max-weight', params.maxWeight || '');
+    if (Array.isArray(params.equipment) && params.equipment.length) {
+        setEquipmentChecked(params.equipment);
+    }
+    if (typeof updatePresetDisplay === 'function') updatePresetDisplay();
+}
+
+async function executeChatActions(actions = []) {
+    if (!Array.isArray(actions) || actions.length === 0) return;
+
+    const searchAction = actions.find(a => (a?.type || '').toLowerCase() === 'search');
+    if (!searchAction) return;
+
+    const params = normalizeSearchParamsFromAction(searchAction.params || {});
+    if (!params.origin?.city && !params.origin?.state) {
+        addChatMessage('assistant', 'Не смог определить origin для поиска. Уточните город отправки.');
+        return;
+    }
+
+    applySearchParamsToForm(params);
+    switchSection('search');
+    await doSearch();
+    addChatMessage('assistant', `Поиск выполнен. Найдено: ${state.loads.length} грузов.`);
+}
+
+async function sendChatPrompt() {
+    const input = document.getElementById('ai-chat-input');
+    const sendBtn = document.getElementById('ai-chat-send');
+    if (!input || !sendBtn) return;
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    console.log('[AIDA/UI Chat] sendChatPrompt:start', { text });
+
+    let statusResp = await sendToCore('GET_AI_STATUS');
+    console.log('[AIDA/UI Chat] sendChatPrompt:initial-status', statusResp);
+    if (!statusResp?.status?.online) {
+        if (state.chat.authPending) {
+            addChatMessage('assistant', 'Сначала завершите вход через Google.');
+            return;
+        }
+        if (state.chat.authDenied) {
+            addChatMessage('assistant', 'Вход через Google был отменен. Закройте и снова откройте чат для новой попытки.');
+            return;
+        }
+        const ready = await ensureChatOnboarding();
+        statusResp = await sendToCore('GET_AI_STATUS');
+        console.log('[AIDA/UI Chat] sendChatPrompt:status-after-onboarding', { ready, statusResp });
+        if (!ready || !statusResp?.status?.online) {
+            addChatMessage('assistant', 'Сначала завершите вход через Google.');
+            return;
+        }
+    }
+
+    input.value = '';
+    addChatMessage('user', text);
+
+    sendBtn.disabled = true;
+    try {
+        console.log('[AIDA/UI Chat] sendChatPrompt:AI_CHAT:request');
+        const resp = await sendToCore('AI_CHAT', {
+            message: text,
+            context: {
+                lastSearch: state.settings?.lastSearch || null,
+                loads: Array.isArray(state.loads) ? state.loads.slice(0, 20) : []
+            }
+        });
+
+        console.log('[AIDA/UI Chat] sendChatPrompt:AI_CHAT:response', resp);
+
+        if (!resp) {
+            addChatMessage('assistant', 'Нет ответа от AI.');
+            return;
+        }
+
+        if (resp.reply) {
+            addChatMessage('assistant', resp.reply);
+        } else if (resp.error) {
+            addChatMessage('assistant', `Ошибка AI: ${resp.error}`);
+        }
+
+        await executeChatActions(resp.actions || []);
+    } finally {
+        sendBtn.disabled = false;
     }
 }
 

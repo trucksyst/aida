@@ -3,7 +3,7 @@
   "minimum_chrome_version": "114",
   "name": "AIDA — AI Dispatcher",
   "short_name": "AIDA",
-  "version": "0.1.86",
+  "version": "0.2.06",
   "description": "Персональный инструмент диспетчера. Агрегирует грузы со всех лоадбордов в одном окне.",
   "background": {
     "service_worker": "background/background.js",
@@ -18,8 +18,15 @@
     "scripting",
     "alarms",
     "cookies",
-    "webRequest"
+    "webRequest",
+    "identity"
   ],
+  "oauth2": {
+    "client_id": "156258598437-hvrda4k088gqog76o1mkk4rh6ti2ujdu.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+  },
   "host_permissions": [
     "https://one.dat.com/*",
     "https://login.dat.com/*",
@@ -39,6 +46,9 @@
     "https://members.123loadboard.com/*",
     "https://login.123loadboard.com/*",
     "https://api.retellai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://aiplatform.googleapis.com/*",
+    "https://*.aiplatform.googleapis.com/*",
     "https://nominatim.openstreetmap.org/*",
     "https://router.project-osrm.org/*",
     "https://tile.openstreetmap.org/*"

@@ -376,6 +376,27 @@
 
     </div>
 
+    <!-- AI Chat Widget -->
+    <div id="ai-chat-widget">
+        <button id="ai-chat-fab" title="AI Assistant" aria-label="Open AI chat">
+            🤖
+        </button>
+        <div id="ai-chat-panel" aria-hidden="true">
+            <div id="ai-chat-header">
+                <span>AI Assistant</span>
+                <button id="ai-chat-close" title="Close">✕</button>
+            </div>
+            <div id="ai-chat-auth" style="display:none;">
+                <div id="ai-chat-auth-text">Требуется авторизация для чата</div>
+            </div>
+            <div id="ai-chat-messages"></div>
+            <div id="ai-chat-input-wrap">
+                <input id="ai-chat-input" type="text" placeholder="Напишите запрос: например 'найди реф из Чикаго'">
+                <button id="ai-chat-send" type="button">Send</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast container -->
     <div id="toast-container"></div>
 

@@ -1,6 +1,6 @@
 {
   "name": "aida-extension",
-  "version": "0.1.0",
+  "version": "0.2.06",
   "private": true,
   "description": "AIDA — AI Dispatcher Chrome Extension",
   "scripts": {

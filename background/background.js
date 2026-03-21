@@ -22,6 +22,7 @@
 
 import Storage from './storage.js';
 import Retell from './retell.js';
+import AIBlock from './ai-block.js';
 import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter from './adapters/truckerpath-adapter.js';
@@ -254,6 +255,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
             }
             getSettingsForUI().then(settings => sendResponse({ settings }));
+            return true;
+
+        case 'GET_AI_STATUS':
+            console.log('[AIDA/BG] GET_AI_STATUS:start');
+            AIBlock.getStatus().then(status => sendResponse({ status })).catch(err => {
+                console.error('[AIDA/BG] GET_AI_STATUS:error', err.message);
+                sendResponse({ error: err.message });
+            });
+            return true;
+
+        case 'AI_AUTH_CONNECT':
+            console.log('[AIDA/BG] AI_AUTH_CONNECT:start');
+            AIBlock.connect().then(async result => {
+                console.log('[AIDA/BG] AI_AUTH_CONNECT:result', result);
+                await pushToUI({ settings: await getSettingsForUI() });
+                sendResponse(result);
+            }).catch(err => {
+                console.error('[AIDA/BG] AI_AUTH_CONNECT:error', err.message);
+                sendResponse({ ok: false, error: err.message });
+            });
+            return true;
+
+        case 'AI_AUTH_DISCONNECT':
+            console.log('[AIDA/BG] AI_AUTH_DISCONNECT:start');
+            AIBlock.disconnect().then(async result => {
+                console.log('[AIDA/BG] AI_AUTH_DISCONNECT:result', result);
+                await pushToUI({ settings: await getSettingsForUI() });
+                sendResponse(result);
+            }).catch(err => {
+                console.error('[AIDA/BG] AI_AUTH_DISCONNECT:error', err.message);
+                sendResponse({ ok: false, error: err.message });
+            });
+            return true;
+
+        case 'TOGGLE_AI':
+            Storage.getSettings().then(async settings => {
+                const ai = { ...(settings.ai || {}), enabled: !!message.enabled };
+                await Storage.saveSettings({ ai });
+                await pushToUI({ settings: await getSettingsForUI() });
+                sendResponse({ ok: true, ai });
+            }).catch(err => sendResponse({ error: err.message }));
+            return true;
+
+        case 'AI_ANALYZE_LOADS':
+            (async () => {
+                try {
+                    const loads = Array.isArray(message.loads) ? message.loads : await Storage.getLoads();
+                    const settings = await Storage.getSettings();
+                    const result = await AIBlock.analyzeLoads(loads, message.preferences || settings.user || {});
+                    sendResponse(result);
+                } catch (err) {
+                    sendResponse({ ok: false, error: err.message, results: [] });
+                }
+            })();
+            return true;
+
+        case 'AI_CHAT':
+            (async () => {
+                try {
+                    const context = message.context || {};
+                    const result = await AIBlock.chat(message.message || '', context);
+                    sendResponse(result);
+                } catch (err) {
+                    sendResponse({ ok: false, error: err.message, reply: 'AI сейчас недоступен.', actions: [] });
+                }
+            })();
             return true;
 
         case 'SAVE_SETTINGS':

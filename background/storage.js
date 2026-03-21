@@ -23,6 +23,40 @@ const Storage = {
     '123lb': true
   },
 
+  DEFAULT_AI_SETTINGS: {
+    enabled: true,
+    provider: 'gemini',
+    clientId: '',
+    projectId: 'logload',
+    location: 'global',
+    model: 'gemini-2.5-flash',
+    timeoutMs: 12000,
+    onboarded: false,
+    oauthConnected: false,
+    oauthScopeKey: '',
+    oauthAccessToken: '',
+    oauthExpiresAt: 0
+  },
+
+  normalizeAiSettings(ai = {}) {
+    const normalized = {
+      ...this.DEFAULT_AI_SETTINGS,
+      ...(ai || {}),
+      enabled: true,
+      projectId: ai?.projectId || this.DEFAULT_AI_SETTINGS.projectId
+    };
+
+    if (normalized.projectId) {
+      normalized.location = 'global';
+    }
+
+    if (!normalized.model || normalized.model === 'gemini-2.0-flash' || normalized.model === 'gemini-2.0-flash-001') {
+      normalized.model = this.DEFAULT_AI_SETTINGS.model;
+    }
+
+    return normalized;
+  },
+
   // ============================================================
   // Tokens
   // ============================================================
@@ -89,7 +123,8 @@ const Storage = {
       'settings:theme',
       'settings:truckstopRequestTemplate',
       'settings:truckerpathRequestTemplate',
-      'settings:disabledBoards'
+      'settings:disabledBoards',
+      'settings:ai'
     ]);
     return {
       user: data['settings:user'] || {},
@@ -106,7 +141,8 @@ const Storage = {
       disabledBoards: {
         ...this.DEFAULT_DISABLED_BOARDS,
         ...(data['settings:disabledBoards'] || {})
-      }
+      },
+      ai: this.normalizeAiSettings(data['settings:ai'] || {})
     };
   },
 
@@ -120,6 +156,9 @@ const Storage = {
     if (data.truckstopRequestTemplate !== undefined) updates['settings:truckstopRequestTemplate'] = data.truckstopRequestTemplate;
     if (data.truckerpathRequestTemplate !== undefined) updates['settings:truckerpathRequestTemplate'] = data.truckerpathRequestTemplate;
     if (data.disabledBoards !== undefined) updates['settings:disabledBoards'] = data.disabledBoards;
+    if (data.ai !== undefined) {
+      updates['settings:ai'] = this.normalizeAiSettings(data.ai);
+    }
     if (Object.keys(updates).length === 0) return;
     await chrome.storage.local.set(updates);
   },
