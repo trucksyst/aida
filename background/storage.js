@@ -16,6 +16,13 @@
 
 const Storage = {
 
+  DEFAULT_DISABLED_BOARDS: {
+    dat: true,
+    truckstop: true,
+    tp: true,
+    '123lb': true
+  },
+
   // ============================================================
   // Tokens
   // ============================================================
@@ -96,7 +103,10 @@ const Storage = {
       theme: data['settings:theme'] || 'light',
       truckstopRequestTemplate: data['settings:truckstopRequestTemplate'] || null,
       truckerpathRequestTemplate: data['settings:truckerpathRequestTemplate'] || null,
-      disabledBoards: data['settings:disabledBoards'] || { dat: true, truckstop: true, tp: true }
+      disabledBoards: {
+        ...this.DEFAULT_DISABLED_BOARDS,
+        ...(data['settings:disabledBoards'] || {})
+      }
     };
   },
 
