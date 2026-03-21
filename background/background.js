@@ -22,7 +22,7 @@
 
 import Storage from './storage.js';
 import Retell from './retell.js';
-import AIBlock from './ai-block.js';
+import AIBlock from './ai/index.js';
 import DatAdapter from './adapters/dat-adapter.js';
 import TruckstopAdapter from './adapters/truckstop-adapter.js';
 import TruckerpathAdapter from './adapters/truckerpath-adapter.js';

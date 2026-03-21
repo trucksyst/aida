@@ -379,12 +379,15 @@
     <!-- AI Chat Widget -->
     <div id="ai-chat-widget">
         <button id="ai-chat-fab" title="AI Assistant" aria-label="Open AI chat">
-            🤖
+            <img src="icons/aida-droid.svg" alt="AIDA Droid">
         </button>
         <div id="ai-chat-panel" aria-hidden="true">
             <div id="ai-chat-header">
                 <span>AI Assistant</span>
-                <button id="ai-chat-close" title="Close">✕</button>
+                <div id="ai-chat-header-actions">
+                    <button id="ai-chat-clear" title="Очистить чат" aria-label="Очистить чат">⟲</button>
+                    <button id="ai-chat-close" title="Close" aria-label="Закрыть чат">✕</button>
+                </div>
             </div>
             <div id="ai-chat-auth" style="display:none;">
                 <div id="ai-chat-auth-text">Требуется авторизация для чата</div>
@@ -394,6 +397,7 @@
                 <input id="ai-chat-input" type="text" placeholder="Напишите запрос: например 'найди реф из Чикаго'">
                 <button id="ai-chat-send" type="button">Send</button>
             </div>
+            <div id="ai-chat-resize-handle" aria-hidden="true"></div>
         </div>
     </div>
 
