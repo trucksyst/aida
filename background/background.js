@@ -323,6 +323,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             })();
             return true;
 
+        case 'AI_SEARCH_LOADS': {
+            const params = message.params;
+            const searchId = message.searchId || `ai_${Date.now()}`;
+            if (!params || typeof params !== 'object') {
+                sendResponse({ error: 'Search params missing' });
+                return true;
+            }
+            console.log('[AIDA/Core] AI_SEARCH_LOADS:', { searchId, params });
+            searchLoadsExternal(params, searchId).then(sendResponse).catch(err => {
+                console.error('[AIDA/Core] AI searchLoads error:', err);
+                sendResponse({ error: err.message, loads: [] });
+            });
+            return true;
+        }
+
         case 'SAVE_SETTINGS':
             Storage.saveSettings(message.data).then(async () => {
                 await pushToUI({ settings: await getSettingsForUI() });
@@ -361,6 +376,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 sendResponse({ ok: true });
             }).catch(err => sendResponse({ error: err.message }));
+            return true;
+        }
+
+        case 'CLEAR_AI_LOADS': {
+            Storage.getLoads().then(async loads => {
+                const cleaned = loads.filter(l => !l.searchId?.startsWith('ai_'));
+                await Storage.setLoads(cleaned);
+                await pushToUI({ loads: cleaned });
+                console.log(`[AIDA/Core] CLEAR_AI_LOADS: removed ${loads.length - cleaned.length} AI loads, ${cleaned.length} remaining`);
+                sendResponse({ ok: true });
+            });
             return true;
         }
 
@@ -552,13 +578,70 @@ async function searchLoads(params) {
         return Array.isArray(arr) ? arr : [];
     });
 
-    await Storage.clearActive();
-    await Storage.setLoads(loads);
+    await Storage.mergeLoads(loads, 'ui');
 
     await Storage.saveSettings({ ...settings, lastSearch: params });
     await pushToUI({ loads: await Storage.getLoads(), lastRefreshTime: Date.now() });
 
     return { loads, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
+}
+
+// ============================================================
+// searchLoadsExternal — AI / внешний поиск через тот же pipeline
+// Результаты мержатся в work:loads с searchId, не затирая UI-грузы
+// ============================================================
+
+async function searchLoadsExternal(params, searchId) {
+    if (!params) throw new Error('No search params');
+    if (!searchId) throw new Error('No searchId');
+
+    const settings = await Storage.getSettings();
+    const disabled = settings.disabledBoards || {};
+
+    const boards = Object.keys(ADAPTERS);
+    const skipResult = { ok: true, loads: [], meta: { skipped: true } };
+
+    const searchPromises = boards.map(board => {
+        if (disabled[board]) return Promise.resolve(skipResult);
+        const adapter = ADAPTERS[board].module;
+        return adapter.search(params);
+    });
+
+    const results = await Promise.allSettled(searchPromises);
+
+    const adapterWarnings = [];
+    const boardLoads = {};
+
+    boards.forEach((board, i) => {
+        const displayName = ADAPTERS[board].displayName;
+        const result = results[i];
+
+        if (result.status === 'rejected') {
+            console.warn(`[AIDA/Core] AI ${displayName} adapter error:`, result.reason?.message);
+            adapterWarnings.push(`${displayName}: ${result.reason?.message || 'error'}`);
+            boardLoads[board] = [];
+            return;
+        }
+
+        const raw = result.value || {};
+        if (raw?.error) {
+            console.warn(`[AIDA/Core] AI ${displayName} adapter returned error:`, raw.error);
+            adapterWarnings.push(`${displayName}: ${raw.error.message || raw.error}`);
+        }
+        boardLoads[board] = raw?.loads || (Array.isArray(raw) ? raw : []);
+    });
+
+    // Мерж грузов со всех бордов
+    const loads = boards.flatMap(board => {
+        const arr = boardLoads[board];
+        return Array.isArray(arr) ? arr : [];
+    });
+
+    // Мерж в work:loads с searchId (не заменяет UI-грузы)
+    await Storage.mergeLoads(loads, searchId);
+
+    console.log(`[AIDA/Core] AI search done: ${loads.length} loads, searchId=${searchId}`);
+    return { loads, searchId, warnings: adapterWarnings.length > 0 ? adapterWarnings : undefined };
 }
 
 // ============================================================
@@ -574,16 +657,18 @@ async function loadMoreLoads() {
         return { ok: true, added: 0, hasMore: false };
     }
 
-    // Мерж: добавляем новые грузы к существующим (в конец)
+    // Мерж: добавляем новые грузы к существующим (в конец), тегируем searchId
     const existing = await Storage.getLoads();
     const existingIds = new Set(existing.map(l => l.id));
-    const newLoads = result.loads.filter(l => !existingIds.has(l.id));
+    const newLoads = result.loads
+        .filter(l => !existingIds.has(l.id))
+        .map(l => ({ ...l, searchId: 'ui' }));
 
     if (newLoads.length === 0) {
         return { ok: true, added: 0, hasMore: false };
     }
 
-    const merged = [...existing, ...newLoads]; // новые в конец
+    const merged = [...existing, ...newLoads];
     await Storage.setLoads(merged);
     await pushToUI({ loads: merged });
 
@@ -622,7 +707,9 @@ async function handleRealtimeUpdate(board, event) {
     if (Array.isArray(event) && event.length > 0) {
         const existing = await Storage.getLoads();
         const existingIds = new Set(existing.map(l => l.id));
-        const newLoads = event.filter(l => !existingIds.has(l.id));
+        const newLoads = event
+            .filter(l => !existingIds.has(l.id))
+            .map(l => ({ ...l, searchId: 'ui' }));
 
         if (newLoads.length === 0) return;
 

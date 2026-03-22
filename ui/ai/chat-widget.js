@@ -1,5 +1,13 @@
 import { renderChatLoadCards } from './load-card-renderer.js';
 
+let chatHistory = [];
+
+function saveChatHistory() {
+  try {
+    chrome.storage.local.set({ 'ai:chatHistory': chatHistory.slice(-30) });
+  } catch (e) { /* ignore */ }
+}
+
 const CHAT_PANEL_MIN_SIZE = {
   width: 300,
   height: 320
@@ -145,6 +153,10 @@ function addChatMessage(textRole, text) {
   node.textContent = text;
   wrap.appendChild(node);
   wrap.scrollTop = wrap.scrollHeight;
+  // Сохраняем в историю (последние 30 сообщений)
+  chatHistory.push({ role: textRole === 'user' ? 'user' : 'assistant', text });
+  if (chatHistory.length > 30) chatHistory.splice(0, chatHistory.length - 30);
+  saveChatHistory();
 }
 
 function appendChatNode(node) {
@@ -152,6 +164,23 @@ function appendChatNode(node) {
   if (!wrap || !node) return;
   wrap.appendChild(node);
   wrap.scrollTop = wrap.scrollHeight;
+}
+
+function showThinking() {
+  hideThinking();
+  const wrap = document.getElementById('ai-chat-messages');
+  if (!wrap) return;
+  const el = document.createElement('div');
+  el.className = 'ai-msg assistant ai-thinking';
+  el.innerHTML = '<span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span> AI думает';
+  el.id = 'ai-thinking-indicator';
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function hideThinking() {
+  const el = document.getElementById('ai-thinking-indicator');
+  if (el) el.remove();
 }
 
 function clearChatMessages() {
@@ -214,7 +243,7 @@ async function syncChatAuthUi({ state, sendToCore, applySettings, autoConnect = 
     authText.textContent = 'Подключаю Google авторизацию...';
     addChatMessage('assistant', 'Открываю вход через Google...');
     console.log('[AIDA/UI Chat] syncChatAuthUi:autoConnect:before-connect');
-    const ok = await connectAiOauth({ sendToCore, showToast: () => {}, state, silent: true });
+    const ok = await connectAiOauth({ sendToCore, showToast: () => { }, state, silent: true });
     state.chat.authPending = false;
     console.log('[AIDA/UI Chat] syncChatAuthUi:autoConnect:after-connect', { ok });
     if (ok) {
@@ -313,6 +342,18 @@ function applySearchParamsToForm(params, deps) {
 async function executeChatActions(actions = [], deps) {
   if (!Array.isArray(actions) || actions.length === 0) return;
 
+  // --- show_loads: AI хочет показать конкретные грузы карточками ---
+  const showAction = actions.find(a => (a?.type || '').toLowerCase() === 'show_loads');
+  if (showAction && Array.isArray(showAction.loadIds) && showAction.loadIds.length > 0) {
+    const idsSet = new Set(showAction.loadIds);
+    const loadsToShow = (deps.state.loads || []).filter(l => idsSet.has(l.id));
+    if (loadsToShow.length > 0) {
+      renderChatLoadCards(loadsToShow, appendChatNode, loadsToShow.length);
+    }
+    return;
+  }
+
+  // --- search: AI запрос на поиск ---
   const searchAction = actions.find((action) => (action?.type || '').toLowerCase() === 'search');
   if (!searchAction) return;
 
@@ -322,11 +363,26 @@ async function executeChatActions(actions = [], deps) {
     return;
   }
 
-  applySearchParamsToForm(params, deps);
-  deps.switchSection('search');
-  await deps.doSearch();
-  addChatMessage('assistant', `Поиск выполнен. Найдено: ${deps.state.loads.length} грузов.`);
-  renderChatLoadCards(deps.state.loads, appendChatNode, 3);
+  const searchId = `ai_${Date.now()}`;
+  const originLabel = [params.origin?.city, params.origin?.state].filter(Boolean).join(', ');
+  const equipLabel = (params.equipment || []).join(', ') || 'VAN';
+  addChatMessage('assistant', `🔎 Ищу ${equipLabel} из ${originLabel}...`);
+
+  const resp = await deps.sendToCore('AI_SEARCH_LOADS', { params, searchId });
+
+  if (resp?.error) {
+    addChatMessage('assistant', `Ошибка поиска: ${resp.error}`);
+    return;
+  }
+
+  const loads = Array.isArray(resp?.loads) ? resp.loads : [];
+
+  // Обновить state.loads из Storage (там теперь и UI-грузы, и AI-грузы)
+  const freshLoads = await deps.sendToCore('GET_LOADS');
+  if (freshLoads?.loads) deps.state.loads = freshLoads.loads;
+
+  addChatMessage('assistant', `Найдено: ${loads.length} грузов.`);
+  renderChatLoadCards(loads, appendChatNode, 10);
 }
 
 async function sendChatPrompt(deps) {
@@ -363,33 +419,60 @@ async function sendChatPrompt(deps) {
   addChatMessage('user', text);
 
   sendBtn.disabled = true;
+  showThinking();
   try {
     console.log('[AIDA/UI Chat] sendChatPrompt:AI_CHAT:request');
+    const allLoads = Array.isArray(deps.state.loads) ? deps.state.loads : [];
+
+    // Сжимаем грузы: только ключевые поля (~150 байт каждый вместо ~500)
+    const compressedLoads = allLoads.map(l => ({
+      id: l.id,
+      o: l.origin ? `${l.origin.city||''},${l.origin.state||''}` : '',
+      d: l.destination ? `${l.destination.city||''},${l.destination.state||''}` : '',
+      r: l.rate || 0,
+      rpm: l.rpm || 0,
+      mi: l.miles || 0,
+      w: l.weight || 0,
+      eq: l.equipment || '',
+      br: `${l.broker?.company||''}|${l.broker?.mc||''}`,
+      n: (l.notes || '').slice(0, 80),
+      dt: l.pickupDate || '',
+      len: l.length || 0
+    }));
+    console.log('[AIDA/UI Chat] sendChatPrompt:context loads=', allLoads.length, 'compressed size=', JSON.stringify(compressedLoads).length);
+
     const resp = await deps.sendToCore('AI_CHAT', {
-      message: text,
+      message: `[loadsCount=${allLoads.length}] ${text}`,
       context: {
         lastSearch: deps.state.settings?.lastSearch || null,
-        loads: Array.isArray(deps.state.loads) ? deps.state.loads.slice(0, 20) : []
+        loads: compressedLoads,
+        history: chatHistory.slice(-10)
       }
     });
 
     console.log('[AIDA/UI Chat] sendChatPrompt:AI_CHAT:response', resp);
-
-    const hasSearchAction = Array.isArray(resp?.actions)
-      && resp.actions.some((action) => (action?.type || '').toLowerCase() === 'search');
+    hideThinking();
 
     if (!resp) {
-      addChatMessage('assistant', 'Нет ответа от AI.');
+      addChatMessage('assistant', 'Нет ответа от AI. Попробуйте ещё раз.');
       return;
     }
 
-    if (resp.reply && !hasSearchAction) {
-      addChatMessage('assistant', resp.reply);
-    } else if (resp.error) {
+    if (resp.error) {
       addChatMessage('assistant', `Ошибка AI: ${resp.error}`);
+      return;
+    }
+
+
+    if (resp.reply) {
+      addChatMessage('assistant', resp.reply);
     }
 
     await executeChatActions(resp.actions || [], deps);
+  } catch (err) {
+    console.error('[AIDA/UI Chat] sendChatPrompt:error', err);
+    hideThinking();
+    addChatMessage('assistant', 'AI временно недоступен. Попробуйте через несколько секунд.');
   } finally {
     sendBtn.disabled = false;
   }
@@ -450,6 +533,7 @@ export function initAiChatWidget(deps) {
     deps.state.chat.authDenied = false;
     deps.state.chat.lastAuthError = '';
 
+    // Всегда чистый старт — при закрытии чат очищается
     if (!document.getElementById('ai-chat-messages')?.children?.length) {
       addChatMessage('assistant', 'Привет. Я AI-помощник AIDA. Напишите запрос на поиск, например: "найди reefer из Chicago в Atlanta".');
     }
@@ -465,10 +549,18 @@ export function initAiChatWidget(deps) {
     panel.classList.remove('floating');
     panel.setAttribute('aria-hidden', 'true');
     resetChatPanelLayout(panel);
+    // Очищаем чат и AI-данные при закрытии
+    clearChatMessages();
+    chatHistory.length = 0;
+    saveChatHistory();
+    // Удаляем AI-грузы из Storage (searchId='ai_*'), UI-грузы не трогаем
+    deps.sendToCore('CLEAR_AI_LOADS');
   });
 
   clearBtn.addEventListener('click', () => {
     clearChatMessages();
+    chatHistory.length = 0;
+    saveChatHistory();
     input.focus();
   });
 

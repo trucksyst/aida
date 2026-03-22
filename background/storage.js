@@ -111,6 +111,60 @@ const Storage = {
     await this.setLoads(filtered);
   },
 
+  /** Удалить active грузы только с указанным searchId. Грузы других потоков не трогаются. */
+  async clearActiveBySearchId(searchId) {
+    if (!searchId) return;
+    const loads = await this.getLoads();
+    const filtered = loads.filter(l => !(l.status === 'active' && l.searchId === searchId));
+    await this.setLoads(filtered);
+  },
+
+  /** Отпечаток груза: все значимые поля. Если совпадает — перепост. */
+  _fingerprint(l) {
+    const parts = [
+      l.origin?.city, l.origin?.state,
+      l.destination?.city, l.destination?.state,
+      l.equipment,
+      l.rate, l.rpm, l.miles, l.weight, l.length,
+      l.fullPartial,
+      l.broker?.mc, l.broker?.company, l.broker?.phone, l.broker?.email,
+      l.notes,
+      l.pickupDate
+    ];
+    return parts.map(v => v == null || v === '' ? '' : String(v).toLowerCase().trim()).join('|');
+  },
+
+  /** Мерж грузов в work:loads: удалить старые с этим searchId, добавить новые. Дедупликация по id + по контенту. */
+  async mergeLoads(newLoads, searchId) {
+    const existing = await this.getLoads();
+    // Убираем старые грузы с этим searchId
+    const withoutOld = existing.filter(l => l.searchId !== searchId);
+    // Дедупликация по id
+    const existingIds = new Set(withoutOld.map(l => l.id));
+    const tagged = newLoads
+      .filter(l => !existingIds.has(l.id))
+      .map(l => ({ ...l, searchId }));
+
+    const all = [...withoutOld, ...tagged];
+
+    // Дедупликация по контенту: точные копии → оставляем самый свежий
+    const fpMap = new Map();
+    for (const load of all) {
+      const fp = this._fingerprint(load);
+      const prev = fpMap.get(fp);
+      if (!prev) {
+        fpMap.set(fp, load);
+      } else {
+        const prevTime = prev.postedAt ? new Date(prev.postedAt).getTime() : 0;
+        const curTime = load.postedAt ? new Date(load.postedAt).getTime() : 0;
+        fpMap.set(fp, curTime > prevTime ? load : prev);
+      }
+    }
+    const merged = [...fpMap.values()];
+    await this.setLoads(merged);
+    return merged;
+  },
+
   // ============================================================
   // Settings
   // ============================================================

@@ -940,10 +940,8 @@ async function doSearch() {
             showToast('Search error: ' + result.error, 'error');
         } else {
             const loads = Array.isArray(result?.loads) ? result.loads : (Array.isArray(resp) ? resp : []);
-            state.loads = loads;
-            renderTable();
-            updateStatusBar();
-            // Показываем warnings от адаптеров
+            // state.loads обновляется через pushToUI → onDataUpdated (все грузы из Storage)
+            // Здесь только тосты и warnings
             if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
                 showToast('Board issues: ' + result.warnings.join('; '), 'error');
             }
@@ -958,12 +956,6 @@ async function doSearch() {
                     showToast('No loads found for this search.', 'error');
                 }
             }
-        }
-        const fresh = await sendToCore('GET_LOADS');
-        if (fresh?.loads?.length > 0 && state.loads.length === 0) {
-            state.loads = fresh.loads;
-            renderTable();
-            updateStatusBar();
         }
     } finally {
         btn.textContent = 'Search';

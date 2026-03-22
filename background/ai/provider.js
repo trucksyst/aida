@@ -52,7 +52,7 @@ function buildAiUrl(ai) {
   return buildGeminiApiUrl(ai);
 }
 
-export async function callAiModel({ ai, timeoutMs, instruction, payload }) {
+export async function callAiModel({ ai, timeoutMs, instruction, payload, historyContents }) {
   const normalizedAi = normalizeAiForVertex(ai);
   const tokenResult = await getValidAccessToken(normalizedAi, false);
   if (!tokenResult.ok || !tokenResult.token) {
@@ -63,7 +63,18 @@ export async function callAiModel({ ai, timeoutMs, instruction, payload }) {
   const url = buildAiUrl(runtimeAi);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs || 12000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs || 60000);
+
+  // Multi-turn: history + текущее сообщение
+  const contents = [
+    ...(Array.isArray(historyContents) ? historyContents : []),
+    { role: 'user', parts: [{ text: JSON.stringify(payload) }] }
+  ];
+
+  // KeepAlive: Chrome MV3 убивает SW через ~30с. Пингуем каждые 20с.
+  const keepAlive = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {});
+  }, 20000);
 
   try {
     const resp = await fetch(url, {
@@ -80,10 +91,7 @@ export async function callAiModel({ ai, timeoutMs, instruction, payload }) {
           temperature: 0.2,
           topP: 0.9
         },
-        contents: [{
-          role: 'user',
-          parts: [{ text: JSON.stringify(payload) }]
-        }]
+        contents
       }),
       signal: controller.signal
     });
@@ -107,5 +115,6 @@ export async function callAiModel({ ai, timeoutMs, instruction, payload }) {
     return { ok: false, error: e.message };
   } finally {
     clearTimeout(timeout);
+    clearInterval(keepAlive);
   }
 }

@@ -543,8 +543,7 @@ function normalize(raw) {
         postedAt: raw.servicedWhen || item.servicedWhen || raw.postedAt || '',
         status: 'active',
         bookNow: !!(ri.bookable),
-        factorable: !!(raw.isFactorable || item.isFactorable),
-        raw
+        factorable: !!(raw.isFactorable || item.isFactorable)
     };
 }
 
@@ -567,7 +566,7 @@ const WORKLIST_BASE = 'https://freight.api.dat.com/worklist-service/v1/items';
  */
 function getDatPostingId(load) {
     if (!load) return null;
-    if (load.raw?.assetInfo?.postingId) return String(load.raw.assetInfo.postingId);
+    if (load.externalId) return String(load.externalId);
     if (load.id && typeof load.id === 'string' && load.id.startsWith('dat_')) {
         return load.id.slice(4);
     }

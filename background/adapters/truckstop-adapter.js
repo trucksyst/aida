@@ -345,6 +345,7 @@ function normalizeTruckstopRaw(raw) {
         id: `ts_${loadId || Math.random().toString(36).slice(2, 10)}`,
         board: BOARD,
         externalId: raw.legacyLoadId ? String(raw.legacyLoadId) : String(loadId || ''),
+        _uuid: String(raw.id || loadId || ''),
         origin: { city: originCity, state: originState, lat: null, lng: null },
         destination: { city: destCity, state: destState, lat: null, lng: null },
         equipment: eq || 'Unknown',
@@ -374,8 +375,7 @@ function normalizeTruckstopRaw(raw) {
         postedAt,
         status: 'active',
         bookNow: !!(raw.isBookItNow || raw.canBookItNow),
-        factorable: !!(raw.isCompanyFactorable),
-        raw
+        factorable: !!(raw.isCompanyFactorable)
     };
 }
 
@@ -766,7 +766,7 @@ const TruckstopAdapter = {
 
             let enriched = 0;
             for (const load of loads) {
-                const d = map[load.raw?.id];
+                const d = map[load._uuid];
                 if (!d) continue;
 
                 // Email: prefer brokerProfile, fallback postAsUser
